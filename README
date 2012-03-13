@@ -1,0 +1,23 @@
+msm7x30 camera HAL
+
+With the arrival of Ice Cream Sandwich (ICS) the way that cameras are
+interfaced has changed significantly. The code thrown together here is
+an attempt to arrive at a point whereby the camera on my phone works.
+
+The phone is an HTC Desire HD. I've been working with the CyanogenMod
+repositories, but this code should be generic enough to work for all
+those with custom ROM's and should also be easily adaptable to support
+other Qualcomm chipsets.
+
+There is very little information easily available about the sensor and
+how it should be used, but the kernel driver module from Code Aurora is
+useful.
+
+It would be nice if HTC would release the code to their liboemcamera so
+that efforts like this could be completed faster and with more success.
+Sadly I suspect that pigs will be flying past my window before that
+happens.
+
+I'm far from the most qualified (or even slightly qualified for that matter)
+so all help welcome :-)
+
