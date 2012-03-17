@@ -34,6 +34,7 @@
 
 #define CHECK_VOID if (NULL == device || NULL == device->priv) return;
 #define CHECK_INT  if (NULL == device || NULL == device->priv) return -EINVAL;
+#define CHECK_CHAR if (NULL == device || NULL == device->priv) return NULL;
 #define CAM_PTR    ((android::AbstractedCamera *)(device->priv))
 
 /** Set the ANativeWindow to which preview frames are sent */
@@ -65,8 +66,8 @@ static void camera_set_callbacks(camera_device_t *device,
 static void camera_enable_msg_type(camera_device_t *device, int32_t msg_type)
 {
     LOGD("%s(%08x)", __FUNCTION__, msg_type);
-    logMessages(msg_type);
-    android::HalCamera *cam = (android::HalCamera *)device->priv;
+    CHECK_VOID
+    CAM_PTR->enableMsgType(msg_type);
 }
 
 /**
@@ -82,8 +83,8 @@ static void camera_enable_msg_type(camera_device_t *device, int32_t msg_type)
 static void camera_disable_msg_type(camera_device_t *device, int32_t msg_type)
 {
     LOGD("%s(%08x)", __FUNCTION__, msg_type);
-    logMessages(msg_type);
-    android::HalCamera *cam = (android::HalCamera *)device->priv;
+    CHECK_VOID
+    CAM_PTR->disableMsgType(msg_type);
 }
 
 /*
@@ -94,72 +95,51 @@ static void camera_disable_msg_type(camera_device_t *device, int32_t msg_type)
 static int camera_msg_type_enabled(camera_device_t *device, int32_t msg_type)
 {
     LOGD("%s", __FUNCTION__);
-
-    if(!device)
-        return false;
-    android::HalCamera *cam = (android::HalCamera *)device->priv;
-    return false;
+    CHECK_INT
+    return CAM_PTR->isMsgTypeEnabled(msg_type);
 }
 
 static int camera_start_preview(camera_device_t *device)
 {
     LOGD("%s()", __FUNCTION__);
-    if (NULL == device || NULL == device->priv)
-        return -EINVAL;
-    android::HalCamera *cam = (android::HalCamera *)device->priv;
-    return cam->startPreview();
+    CHECK_INT
+    return CAM_PTR->startPreview();
 }
 
 static void camera_stop_preview(camera_device_t *device)
 {
     LOGD("%s()", __FUNCTION__);
-
-    if(!device)
-        return;
+    CHECK_VOID
+    CAM_PTR->stopPreview();
 }
 
 /* Returns whether the camera preview is currently enabled. */
 static int camera_preview_enabled(camera_device_t *device)
 {
     LOGD("%s()", __FUNCTION__);
-    if (NULL == device || NULL == device->priv)
-        return -EINVAL;
-    android::HalCamera *cam = (android::HalCamera *)device->priv;
-    return cam->previewEnabled();
+    CHECK_INT
+    return CAM_PTR->isPreviewEnabled();
 }
 
 static int camera_store_meta_data_in_buffers(camera_device_t *device, int enable)
 {
-    int rv = -EINVAL;
-
     LOGD("%s", __FUNCTION__);
-
-    if(!device)
-        return rv;
-
-    return rv;
-    //return enable ? android::INVALID_OPERATION: android::OK;
+    CHECK_INT
+    return CAM_PTR->storeMetaDataInBuffers(enable);
 }
 
 static int camera_start_recording(camera_device_t *device)
 {
-    int rv = -EINVAL;
-
     LOGD("%s", __FUNCTION__);
-
-    if(!device)
-        return rv;
-
-    return rv;
+    CHECK_INT
+    return CAM_PTR->startRecording();
 }
 
 static void camera_stop_recording(camera_device_t *device)
 {
     LOGD("%s", __FUNCTION__);
-
-    if(!device)
-        return;
-
+    CHECK_VOID
+    return CAM_PTR->stopRecording();
 }
 
 static int camera_recording_enabled(camera_device_t *device)
@@ -175,107 +155,82 @@ static int camera_recording_enabled(camera_device_t *device)
 }
 
 static void camera_release_recording_frame(camera_device_t *device,
-                                                        const void *opaque)
+                                           const void *opaque)
 {
     LOGD("%s", __FUNCTION__);
-
-    if(!device)
-        return;
-
+    CHECK_VOID
+    CAM_PTR->releaseRecordingFrame(opaque);
 }
 
 static int camera_auto_focus(camera_device_t *device)
 {
     LOGD("%s", __FUNCTION__);
-    if (NULL == device || NULL == device->priv)
-        return -EINVAL;
-    android::HalCamera *cam = (android::HalCamera *)device->priv;
-    return cam->autoFocus();
+    CHECK_INT
+    return CAM_PTR->autoFocus();
 }
 
 static int camera_cancel_auto_focus(camera_device_t *device)
 {
     LOGD("%s()", __FUNCTION__);
-    if (NULL == device || NULL == device->priv)
-        return -EINVAL;
-    android::HalCamera *cam = (android::HalCamera *)device->priv;
-    return cam->cancelAutoFocus();
+    CHECK_INT
+    return CAM_PTR->cancelAutoFocus();
 }
 
 static int camera_take_picture(camera_device_t *device)
 {
     LOGD("%s()", __FUNCTION__);
-    if (NULL == device || NULL == device->priv)
-        return -EINVAL;
-    android::HalCamera *cam = (android::HalCamera *)device->priv;
-    return -EINVAL;
+    CHECK_INT
+    return CAM_PTR->takePicture();
 }
 
 static int camera_cancel_picture(camera_device_t *device)
 {
     LOGD("%s()", __FUNCTION__);
-    if (NULL == device || NULL == device->priv)
-        return -EINVAL;
-    android::HalCamera *cam = (android::HalCamera *)device->priv;
-    return android::NO_ERROR;
+    CHECK_INT
+    return CAM_PTR->cancelPicture();
 }
 
 static int camera_set_parameters(camera_device_t *device, const char *params)
 {
     LOGD("%s (%s)", __FUNCTION__, params);
-    if (NULL == device || NULL == device->priv)
-        return -EINVAL;
-    android::HalCamera *cam = (android::HalCamera *)device->priv;
-    return cam->setParameters(params);
+    CHECK_INT
+    return CAM_PTR->setParameters(params);
 }
 
 static char *camera_get_parameters(camera_device_t *device)
 {
     LOGD("%s()", __FUNCTION__);
-
-    if(NULL == device)
-        return NULL; /* ??? Should we return an empty string? */
-
-    android::HalCamera *cam = (android::HalCamera *)device->priv;
-    LOGD("params = %s", cam->getParameters());
-    return cam->getParameters();
+    CHECK_CHAR
+    return CAM_PTR->getParameters();
 }
 
 static void camera_put_parameters(camera_device_t *device, char *params)
 {
     LOGD("%s(%s)", __FUNCTION__, params);
-    /* ??? The ti CameraHal module has this as a no-op? */
+    CHECK_VOID
+    CAM_PTR->putParameters(params);
     free(params);
 }
 
 static int camera_send_command(camera_device_t *device, int32_t cmd, 
                                                 int32_t arg1, int32_t arg2)
 {
-    int rv = -EINVAL;
-
     LOGD("%s(%i, %i, %i)", __FUNCTION__, cmd, arg1, arg2);
-
-    if (NULL == device)
-        return -EINVAL;
-
-    return rv;
+    CHECK_INT
+    return CAM_PTR->sendCommand(cmd, arg1, arg2);
 }
 
 static void camera_release(camera_device_t *device)
 {
     LOGD("%s()", __FUNCTION__);
-    if (NULL == device || NULL == device->priv)
-        return;
+    CHECK_VOID
+    CAM_PTR->releaseCamera();
 }
 
 static int camera_dump(camera_device_t *device, int fd)
 {
-    int rv = -EINVAL;
-
-    if(!device)
-        return rv;
-
-    return rv;
+    CHECK_INT
+    return CAM_PTR->dumpCamera(fd);
 }
 
 static int camera_device_close(hw_device_t* device)
@@ -289,7 +244,7 @@ static int camera_device_close(hw_device_t* device)
     if (dev->ops)
         free(dev->ops);
     if (dev->priv)
-        delete (android::HalCamera *)(dev->priv);
+        delete (android::AbstractedCamera *)(dev->priv);
 
     free(dev);
     return 0;
@@ -353,7 +308,7 @@ int camera_device_open(const hw_module_t* module, const char* name,
 
     cameraDev->ops = cameraOps;
 
-    cameraDev->priv = new android::HalCamera(cameraid);
+    cameraDev->priv = new android::AbstractedCamera(cameraid);
     
     *device = &cameraDev->common;
     return 0;
