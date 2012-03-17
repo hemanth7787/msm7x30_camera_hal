@@ -30,20 +30,19 @@
 #include <hardware/camera.h>
 #include <cutils/log.h>
 
-#include "HalCamera.h"
+#include "AbstractedCamera.h"
 
-void logMessages(int32_t msgs);
+#define CHECK_VOID if (NULL == device || NULL == device->priv) return;
+#define CHECK_INT  if (NULL == device || NULL == device->priv) return -EINVAL;
+#define CAM_PTR    ((android::AbstractedCamera *)(device->priv))
 
 /** Set the ANativeWindow to which preview frames are sent */
 static int camera_set_preview_window(camera_device_t *device,
                                          struct preview_stream_ops *window)
 {
     LOGD("%s(%p)", __FUNCTION__, window);
-    if (NULL == device || NULL == device->priv)
-        return -EINVAL;
-    /* window can be NULL, so don't worry about checking it here. */
-    android::HalCamera *cam = (android::HalCamera *)device->priv;
-    return cam->setPreviewWindow(window);
+    CHECK_INT
+    return CAM_PTR->setPreviewWindow(window);
 }
 
 /** Set the notification and data callbacks */
@@ -56,11 +55,8 @@ static void camera_set_callbacks(camera_device_t *device,
 {
     LOGD("%s (%p, %p, %p, %p, %p)", __FUNCTION__, notify_cb, data_cb, 
                                              data_ts_cb, get_memory, user);
-
-    if(!device)
-        return;
-    android::HalCamera *cam = (android::HalCamera *)device->priv;
-    return cam->setCallbacks(notify_cb, data_cb, data_ts_cb, get_memory, user);
+    CHECK_VOID
+    return CAM_PTR->setCallbacks(notify_cb, data_cb, data_ts_cb, get_memory, user);
 }
 
 /**
@@ -221,7 +217,7 @@ static int camera_cancel_picture(camera_device_t *device)
     if (NULL == device || NULL == device->priv)
         return -EINVAL;
     android::HalCamera *cam = (android::HalCamera *)device->priv;
-    return NO_ERROR;
+    return android::NO_ERROR;
 }
 
 static int camera_set_parameters(camera_device_t *device, const char *params)

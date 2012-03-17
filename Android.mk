@@ -25,11 +25,13 @@ LOCAL_MODULE_TAGS := optional
 	
 LOCAL_SRC_FILES := \
     HalModule.cpp \
-    HalDevice.cpp \
-    HalCamera.cpp \
+    AbstractedDevice.cpp \
+    AbstractedCamera.cpp \
     CameraMessages.cpp \
     CameraAdapter.cpp \
-    Memory.cpp
+    Memory.cpp \
+    ParameterHelper.cpp \
+    CallbackNotifier.cpp
 
 LOCAL_SHARED_LIBRARIES := liblog libutils libcutils libbinder
 LOCAL_SHARED_LIBRARIES += libui libhardware libcamera_client
