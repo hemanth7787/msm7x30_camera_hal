@@ -16,8 +16,6 @@
  */
 
 
-#include <utils/String8.h>
-
 #include "Memory.h"
 
 namespace android {
