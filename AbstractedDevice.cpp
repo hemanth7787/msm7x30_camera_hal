@@ -20,7 +20,7 @@
  * required to provide a camera_device_t structure for Android HAL.
  */
 
-#define LOG_TAG "HalCameraDevice"
+#define LOG_TAG "AbstractedDevice"
 
 #include <fcntl.h>
 #include <strings.h>
@@ -94,7 +94,7 @@ static void camera_disable_msg_type(camera_device_t *device, int32_t msg_type)
  */
 static int camera_msg_type_enabled(camera_device_t *device, int32_t msg_type)
 {
-    LOGD("%s", __FUNCTION__);
+    LOGD("%s(%08x)", __FUNCTION__, msg_type);
     CHECK_INT
     return CAM_PTR->isMsgTypeEnabled(msg_type);
 }
@@ -123,7 +123,7 @@ static int camera_preview_enabled(camera_device_t *device)
 
 static int camera_store_meta_data_in_buffers(camera_device_t *device, int enable)
 {
-    LOGD("%s", __FUNCTION__);
+    LOGD("%s(%d)", __FUNCTION__, enable);
     CHECK_INT
     return CAM_PTR->storeMetaDataInBuffers(enable);
 }
@@ -144,27 +144,22 @@ static void camera_stop_recording(camera_device_t *device)
 
 static int camera_recording_enabled(camera_device_t *device)
 {
-    int rv = -EINVAL;
-
     LOGD("%s", __FUNCTION__);
-
-    if(!device)
-        return rv;
-
-    return rv;
+    CHECK_INT
+    return CAM_PTR->isRecordingEnabled();
 }
 
 static void camera_release_recording_frame(camera_device_t *device,
                                            const void *opaque)
 {
-    LOGD("%s", __FUNCTION__);
+    LOGD("%s(%p)", __FUNCTION__, opaque);
     CHECK_VOID
     CAM_PTR->releaseRecordingFrame(opaque);
 }
 
 static int camera_auto_focus(camera_device_t *device)
 {
-    LOGD("%s", __FUNCTION__);
+    LOGD("%s()", __FUNCTION__);
     CHECK_INT
     return CAM_PTR->autoFocus();
 }
