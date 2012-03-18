@@ -34,6 +34,9 @@ AbstractedCamera::AbstractedCamera(int cameraId) : mCallbackNotifier()
     mPreviewWidth = 0;
     mPreviewHeight = 0;
 
+    mPictureWidth = 0;
+    mPictureHeight = 0;
+    
     mDisplayPaused = false;  
 
     mPreviewBufs = NULL;
@@ -216,17 +219,13 @@ int AbstractedCamera::setParameters(const CameraParameters& params)
     mAdapter.setPreviewSize(width, height);
 
     const char *keys[] = {
-        CameraParameters::KEY_PREVIEW_SIZE,
         CameraParameters::KEY_SUPPORTED_PREVIEW_SIZES,
         CameraParameters::KEY_PREVIEW_FPS_RANGE,
         CameraParameters::KEY_SUPPORTED_PREVIEW_FPS_RANGE,
-        CameraParameters::KEY_PREVIEW_FORMAT,
         CameraParameters::KEY_SUPPORTED_PREVIEW_FORMATS,
         CameraParameters::KEY_PREVIEW_FRAME_RATE,
         CameraParameters::KEY_SUPPORTED_PREVIEW_FRAME_RATES,
-        CameraParameters::KEY_PICTURE_SIZE,
         CameraParameters::KEY_SUPPORTED_PICTURE_SIZES,
-        CameraParameters::KEY_PICTURE_FORMAT,
         CameraParameters::KEY_SUPPORTED_PICTURE_FORMATS,
         CameraParameters::KEY_JPEG_THUMBNAIL_WIDTH,
         CameraParameters::KEY_JPEG_THUMBNAIL_HEIGHT,
@@ -283,6 +282,29 @@ int AbstractedCamera::setParameters(const CameraParameters& params)
         CameraParameters::KEY_VIDEO_STABILIZATION,
         CameraParameters::KEY_VIDEO_STABILIZATION_SUPPORTED,     
     };
+
+    if (! isPreviewEnabled()) {
+        /* Get the new preview width & hieght */
+        const char *valstr = params.get(CameraParameters::KEY_PREVIEW_SIZE);
+        if (NULL != valstr) {
+            params.getPreviewSize(&mPreviewWidth, &mPreviewHeight);
+            mParameters.setPreviewSize(mPreviewWidth, mPreviewHeight);
+        }
+        /* Get the new preview format */
+        valstr = params.get(CameraParameters::KEY_PREVIEW_FORMAT);
+        if (NULL != valstr)
+            mParameters.setPreviewFormat(valstr);
+        /* Get the picture width & height */
+        valstr = params.get(CameraParameters::KEY_PICTURE_SIZE);
+        if (NULL != valstr) {
+            params.getPreviewSize(&mPictureWidth, &mPictureHeight);
+            mParameters.setPictureSize(mPictureWidth, mPictureHeight);
+        }
+        /* Get the new picture format */
+        valstr = params.get(CameraParameters::KEY_PICTURE_FORMAT);
+        if (NULL != valstr)
+            mParameters.setPictureFormat(valstr);
+    }
     
     /* We only make changes when we're not in preview mode. */
     if (! isPreviewEnabled()) {
@@ -316,18 +338,6 @@ bool AbstractedCamera::isPreviewEnabled()
     return (mPreviewEnabled || mPreviewStartInProgress);
 }
 
-/**
-   @brief Sets ANativeWindow object that preview frames are sent to.
-
-   Preview buffers provided to CameraHal via this object. DisplayAdapter 
-   will be interfacing with it to render buffers to display.
-
-   @param[in] window The ANativeWindow object created by Surface flinger
-   @return NO_ERROR If the ANativeWindow object passes validation criteria
-   @todo Define validation criteria for ANativeWindow object. 
-         Define error codes for scenarios
-
- */
 status_t AbstractedCamera::setPreviewWindow(struct preview_stream_ops *window)
 {
     LOG_FUNCTION_NAME;
@@ -335,79 +345,53 @@ status_t AbstractedCamera::setPreviewWindow(struct preview_stream_ops *window)
     mSetPreviewWindowCalled = true;
 
     /* If we are passed a NULL window pointer then we are being asked to
-     * reset, so destory the existing window and free our current display
-     * adapter.
+     * reset, so if we have created a preview window destroy it here and 
+     * reset our internal flag.
      */
     if (NULL == window) {
         LOGD("NULL window passed, resetting display.");
-/*
-        if (mDisplayAdapter.get() != NULL) {
-            mDisplayAdapter.clear();
-        }
-*/
+        if (mPreviewWindow.get() != NULL)
+            mPreviewWindow.clear();
         mSetPreviewWindowCalled = false;
-        return NO_ERROR;
-    }
-    
-    /* If we already have a display adapter then we don't need to do
-     * anything as we can configure the display within the display adapter
-     * to allow for changes of dimensions, etc 
-     */
-/*
-    if(NULL == mDisplayAdapter.get()) {
-        mDisplayAdapter.clear();
-        LOGE("Unable to allocate a display adapter.");
-        return NO_MEMORY;
-    }
-    status_t ret = mDisplayAdapter->initialize();
-    if (ret != NO_ERROR) {
-        mDisplayAdapter.clear();
-        LOGE("Initialisation of display adapter failed.");
         return ret;
     }
-*/
-    /* The display adapter interfaces with the surface to get the required
-     * memory, which will be filled by the camera adapter. To allow the
-     * display adapter to know where to send the frame details, we need to
-     * set the frame provider here.
-     */
-//    mDisplayAdapter->setCameraAdapter(&mAdapter);
-
-    /* Errors that occur in the display adapter have to be propogated back
-     * to the application, which will be done via the callbacks that have
-     * been configured. As these are controlled via the callback notifier,
-     * set the reference here.
-     */
-//    mDisplayAdapter->setErrorHandler(mAppCallbackNotifier.get());
-
-    /* The newly created display adapter will use the window callbacks that
-     * were passed to this function, so set them here.
-     */
-//    ret = mDisplayAdapter->setPreviewWindow(window);
-    if (NO_ERROR != ret) {
-        LOGE("Failed to set the preview window for display adapter. Error: %d", ret);
-    }
     
-    /* If we have been asked to start the preview already, then we are now
-     * in a position to display something, so start the preview.
-     */
-    if (mPreviewStartInProgress) {
-        LOGD("Preview start is in progress, so starting preview.");
-        // Start the preview since the window is now available
-        ret = startPreview();
+    /* If we haven't yet created a preview window object, create it here. */
+    if (NULL == mPreviewWindow.get()) {
+        mPreviewWindow = new PreviewWindow();
+        if(NULL == mPreviewWindow.get()) {
+            LOGD("Failed to create a PreviewWindow object.");
+            return NO_MEMORY;
+        }
+        /* Now we have a PreviewWindow object we need to set the callbacks
+         * it needs to function.
+         */
+        ret  = mPreviewWindow->setPreviewWindow(window);
+
+        if (NO_ERROR != ret) {
+            LOGE("Error setting callbacks for preview window: %d", ret);
+            goto fail;
+        }
+        int fps = mParameters.getInt(CameraParameters::KEY_PREVIEW_FRAME_RATE);
+        ret = mPreviewWindow->setPreviewDetails(mPreviewWidth, mPreviewHeight, fps);
+        if (NO_ERROR != ret) {
+            LOGE("Error setting preview details: %d", ret);
+            goto fail;
+        }
+
+        if (mPreviewStartInProgress) {
+            LOGD("setPreviewWindow called when preview running");
+            ret = startPreview();
+        }
     }
-    
+    /* ??? Should we set the window callbacks here even if we already had
+     *     a preview window object? Does that constitute a reset for the
+     *     object?
+     */
+fail:
     return ret;
 }
 
-/**
-   @brief Start preview mode.
-
-   @param none
-   @return NO_ERROR Camera switched to VF mode
-   @todo Update function header with the different errors that are possible
-
- */
 status_t AbstractedCamera::startPreview()
 {
     LOGD("%s()", __FUNCTION__);
@@ -426,14 +410,14 @@ status_t AbstractedCamera::startPreview()
     unsigned int required_buffer_count = 4;
     unsigned int max_queueble_buffers = 4;
 
-    if (!mSetPreviewWindowCalled) { // || (mDisplayAdapter.get() == NULL)) {
+    if (!mSetPreviewWindowCalled || (NULL == mPreviewWindow.get())) {
         LOGD("Preview not started. Preview in progress flag set");
         mPreviewStartInProgress = true;
         /* Start the camera adapter */
         return NO_ERROR;
     }
 
-    ///Allocate the preview buffers
+    /* Allocate the preview buffers */
     status_t ret = allocPreviewBuffers(mPreviewWidth, mPreviewHeight, 
                                        mParameters.getPreviewFormat(), 
                                        required_buffer_count, 

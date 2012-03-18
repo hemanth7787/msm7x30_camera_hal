@@ -36,7 +36,7 @@
 #include <hardware/camera.h>
 
 #include "CameraAdapter.h"
-//#include "DisplayAdapter.h"
+#include "PreviewWindow.h"
 #include "CallbackNotifier.h"
 
 namespace android {
@@ -119,7 +119,7 @@ class AbstractedCamera {
          * device.
          */
         CameraAdapter mAdapter;
-//        sp<DisplayAdapter> mDisplayAdapter;
+        sp<PreviewWindow> mPreviewWindow;
 
         CallbackNotifier mCallbackNotifier;        
         int mVideoWidth;
@@ -148,9 +148,16 @@ class AbstractedCamera {
         uint32_t *mPreviewOffsets;
         int mPreviewLength;
         int mPreviewFd;
+
         int mPreviewWidth;
         int mPreviewHeight;
-        
+        int mPreviewFormat; /* HAL_PIXEL_FORMAT_xxx constant */
+
+        /* Picture */
+        int mPictureWidth;
+        int mPictureHeight;
+        int mPictureFormat; /* HAL_PIXEL_FORMAT_xxx constant */
+                
         /* Display */
         bool mDisplayPaused;
 };

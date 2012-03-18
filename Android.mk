@@ -31,7 +31,8 @@ LOCAL_SRC_FILES := \
     CameraAdapter.cpp \
     Memory.cpp \
     ParameterHelper.cpp \
-    CallbackNotifier.cpp
+    CallbackNotifier.cpp \
+    PreviewWindow.cpp
 
 LOCAL_SHARED_LIBRARIES := liblog libutils libcutils libbinder
 LOCAL_SHARED_LIBRARIES += libui libhardware libcamera_client
