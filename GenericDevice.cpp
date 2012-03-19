@@ -30,12 +30,12 @@
 #include <hardware/camera.h>
 #include <cutils/log.h>
 
-#include "AbstractedCamera.h"
+#include "Camera.h"
 
 #define CHECK_VOID if (NULL == device || NULL == device->priv) return;
 #define CHECK_INT  if (NULL == device || NULL == device->priv) return -EINVAL;
 #define CHECK_CHAR if (NULL == device || NULL == device->priv) return NULL;
-#define CAM_PTR    ((android::AbstractedCamera *)(device->priv))
+#define CAM_PTR    ((android::Camera *)(device->priv))
 
 /** Set the ANativeWindow to which preview frames are sent */
 static int camera_set_preview_window(camera_device_t *device,
@@ -239,73 +239,35 @@ static int camera_device_close(hw_device_t* device)
     if (dev->ops)
         free(dev->ops);
     if (dev->priv)
-        delete (android::AbstractedCamera *)(dev->priv);
+        delete (android::Camera *)(dev->priv);
 
     free(dev);
     return 0;
 }
 
-int camera_device_open(const hw_module_t* module, const char* name,
-                       hw_device_t** device)
-{
-    int cameraid = atoi(name);
-    camera_device_t *cameraDev = NULL;
-    camera_device_ops_t *cameraOps = NULL;
-       
-    LOGD("%s(%s)", __FUNCTION__, name);
-    *device = NULL;
-
-    /* ??? Should we check that the requested camera exists? */
-    cameraDev = (camera_device_t *)malloc(sizeof(*cameraDev));
-    if (!cameraDev) {
-        LOGE("Failed to allocate memory for camera_device_t structure");
-        return -ENOMEM;
-    }
-    cameraOps = (camera_device_ops_t *)malloc(sizeof(*cameraOps));
-    if (!cameraOps) {
-        LOGE("Failed to allocate memory for cameraOps structure");
-        free(cameraDev);
-        return -ENOMEM;
-    }
-
-    /* Set the correct information in the device structure. */
-    memset(cameraDev, 0, sizeof(*cameraDev));
-    cameraDev->common.tag = HARDWARE_DEVICE_TAG;
-    cameraDev->common.version = 0;
-    cameraDev->common.module = (hw_module_t *)(module);
-    cameraDev->common.close = camera_device_close;
-
-    /* Set the function pointers for the camera operations */
-    memset(cameraOps, 0, sizeof(*cameraOps));
-    cameraOps->set_preview_window = camera_set_preview_window;
-    cameraOps->set_callbacks = camera_set_callbacks;
-    cameraOps->enable_msg_type = camera_enable_msg_type;
-    cameraOps->disable_msg_type = camera_disable_msg_type;
-    cameraOps->msg_type_enabled = camera_msg_type_enabled;
-    cameraOps->start_preview = camera_start_preview;
-    cameraOps->stop_preview = camera_stop_preview;
-    cameraOps->preview_enabled = camera_preview_enabled;
-    cameraOps->store_meta_data_in_buffers = camera_store_meta_data_in_buffers;
-    cameraOps->start_recording = camera_start_recording;
-    cameraOps->stop_recording = camera_stop_recording;
-    cameraOps->recording_enabled = camera_recording_enabled;
-    cameraOps->release_recording_frame = camera_release_recording_frame;
-    cameraOps->auto_focus = camera_auto_focus;
-    cameraOps->cancel_auto_focus = camera_cancel_auto_focus;
-    cameraOps->take_picture = camera_take_picture;
-    cameraOps->cancel_picture = camera_cancel_picture;
-    cameraOps->set_parameters = camera_set_parameters;
-    cameraOps->get_parameters = camera_get_parameters;
-    cameraOps->put_parameters = camera_put_parameters;
-    cameraOps->send_command = camera_send_command;
-    cameraOps->release = camera_release;
-    cameraOps->dump = camera_dump;
-
-    cameraDev->ops = cameraOps;
-
-    cameraDev->priv = new android::AbstractedCamera(cameraid);
-    
-    *device = &cameraDev->common;
-    return 0;
-}
+camera_device_ops_t generic_camera_ops = {
+    camera_set_preview_window,
+    camera_set_callbacks,
+    camera_enable_msg_type,
+    camera_disable_msg_type,
+    camera_msg_type_enabled,
+    camera_start_preview,
+    camera_stop_preview,
+    camera_preview_enabled,
+    camera_store_meta_data_in_buffers,
+    camera_start_recording,
+    camera_stop_recording,
+    camera_recording_enabled,
+    camera_release_recording_frame,
+    camera_auto_focus,
+    camera_cancel_auto_focus,
+    camera_take_picture,
+    camera_cancel_picture,
+    camera_set_parameters,
+    camera_get_parameters,
+    camera_put_parameters,
+    camera_send_command,
+    camera_release,
+    camera_dump
+};
 

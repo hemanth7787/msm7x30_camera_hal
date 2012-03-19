@@ -16,8 +16,8 @@
 
 
 
-#ifndef ABSTRACTED_CAMERA_H
-#define ABSTRACTED_CAMERA_H
+#ifndef CAMERA_H
+#define CAMERA_H
 
 #include <stdio.h>
 #include <stdarg.h>
@@ -35,7 +35,7 @@
 #include <camera/CameraParameters.h>
 #include <hardware/camera.h>
 
-#include "CameraAdapter.h"
+#include "CameraDevice.h"
 #include "PreviewWindow.h"
 #include "CallbackNotifier.h"
 
@@ -44,13 +44,13 @@ namespace android {
 #define LOG_FUNCTION_NAME       LOGD("%d: %s() ENTER", __LINE__, __FUNCTION__);
 #define LOG_FUNCTION_NAME_EXIT  LOGD("%d: %s() EXIT", __LINE__, __FUNCTION__);
 
-class AbstractedCamera {
+class Camera {
     public:
         /** Constructor */
-        AbstractedCamera(int cameraId);
+        Camera(int cameraId);
 
         /** Destructor */
-        ~AbstractedCamera();
+        ~Camera();
 
         /* Callbacks */
         void setCallbacks(camera_notify_callback, camera_data_callback,
@@ -118,7 +118,7 @@ class AbstractedCamera {
         /* The CameraAdapter class actually interfaces with the physical
          * device.
          */
-        CameraAdapter mAdapter;
+        CameraDevice *mAdapter;
         sp<PreviewWindow> mPreviewWindow;
 
         CallbackNotifier mCallbackNotifier;        
@@ -136,8 +136,8 @@ class AbstractedCamera {
         camera_memory_t* mPreviewMemory;
         int mPreviewBufCount;
         const char *mPreviewPixelFormat;
-        KeyedVector<unsigned int, sp<MemoryHeapBase> > mSharedPreviewHeaps;
-        KeyedVector<unsigned int, sp<MemoryBase> > mSharedPreviewBuffers;
+//        KeyedVector<unsigned int, sp<MemoryHeapBase> > mSharedPreviewHeaps;
+//        KeyedVector<unsigned int, sp<MemoryBase> > mSharedPreviewBuffers;
 
         /* Preview. */
         bool mPreviewEnabled;

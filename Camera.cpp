@@ -15,14 +15,14 @@
  * limitations under the License.
  */
 
-#define LOG_TAG "AbstractedCam"
+#define LOG_TAG "Camera"
 
-#include "AbstractedCamera.h"
+#include "Camera.h"
 #include "ParameterHelper.h"
 
 namespace android {
 
-AbstractedCamera::AbstractedCamera(int cameraId) : mCallbackNotifier()
+Camera::Camera(int cameraId) : mCallbackNotifier()
 {
     LOGD("%s", __FUNCTION__);
   
@@ -88,17 +88,10 @@ AbstractedCamera::AbstractedCamera(int cameraId) : mCallbackNotifier()
     mParameters.set(CameraParameters::KEY_SCENE_MODE, 
                     CameraParameters::SCENE_MODE_AUTO);
 
-    mParameters.dump();
-//    mParameters.set("luma-adaptation", "0"); // FIXME: turning it on causes a crash
-    // List supported exposure-offset:
-//    mParameters.set("exposure-offset-values", "0,1,2,3,4,5,6,7,8,9,10");
-    // List of ISO values
-//    mParameters.set("iso-values", "auto,high");
-
-    mAdapter.initialise(cameraId);
+//    mAdapter->initialise(cameraId);
 }
 
-AbstractedCamera::~AbstractedCamera() 
+Camera::~Camera() 
 {
     LOG_FUNCTION_NAME;
 }
@@ -106,7 +99,7 @@ AbstractedCamera::~AbstractedCamera()
 /**************************************************************************
  *  Callbacks
  *************************************************************************/
-void AbstractedCamera::setCallbacks(camera_notify_callback notify_cb,
+void Camera::setCallbacks(camera_notify_callback notify_cb,
                              camera_data_callback data_cb,
                              camera_data_timestamp_callback data_cb_timestamp,
                              camera_request_memory get_memory,
@@ -116,17 +109,17 @@ void AbstractedCamera::setCallbacks(camera_notify_callback notify_cb,
                                     get_memory, user);
 }
 
-void AbstractedCamera::enableMsgType(int32_t msg_type)
+void Camera::enableMsgType(int32_t msg_type)
 {
     mCallbackNotifier.enableMessage(msg_type);
 }
 
-void AbstractedCamera::disableMsgType(int32_t msg_type)
+void Camera::disableMsgType(int32_t msg_type)
 {
     mCallbackNotifier.disableMessage(msg_type);
 }
 
-int AbstractedCamera::isMsgTypeEnabled(int32_t msg_type)
+int Camera::isMsgTypeEnabled(int32_t msg_type)
 {
     return mCallbackNotifier.isMessageEnabled(msg_type);
 }
@@ -134,7 +127,7 @@ int AbstractedCamera::isMsgTypeEnabled(int32_t msg_type)
 /**************************************************************************
  *  Metadata
  *************************************************************************/
-status_t AbstractedCamera::storeMetaDataInBuffers(int enable)
+status_t Camera::storeMetaDataInBuffers(int enable)
 {
     /* Callback should return a negative errno. */
     return -mCallbackNotifier.storeMetaDataInBuffers(enable);
@@ -143,23 +136,23 @@ status_t AbstractedCamera::storeMetaDataInBuffers(int enable)
 /**************************************************************************
  *  Recording (aka video)
  *************************************************************************/
-status_t AbstractedCamera::startRecording()
+status_t Camera::startRecording()
 {
     /* Callback should return a negative errno. */
     return -mCallbackNotifier.enableVideoRecording(mParameters.getPreviewFrameRate());
 }
 
-void AbstractedCamera::stopRecording()
+void Camera::stopRecording()
 {
     mCallbackNotifier.disableVideoRecording();
 }
 
-int AbstractedCamera::isRecordingEnabled()
+int Camera::isRecordingEnabled()
 {
     return mCallbackNotifier.isVideoRecordingEnabled();
 }
 
-void AbstractedCamera::releaseRecordingFrame(const void* opaque)
+void Camera::releaseRecordingFrame(const void* opaque)
 {
     mCallbackNotifier.releaseRecordingFrame(opaque);
 }
@@ -167,7 +160,7 @@ void AbstractedCamera::releaseRecordingFrame(const void* opaque)
 /**************************************************************************
  *  Parameters
  *************************************************************************/
-char* AbstractedCamera::getParameters()
+char* Camera::getParameters()
 {
     String8 params_str8;
     char* params_string = NULL;
@@ -185,7 +178,7 @@ char* AbstractedCamera::getParameters()
     return params_string;
 }
 
-int AbstractedCamera::setParameters(const char* parameters)
+int Camera::setParameters(const char* parameters)
 {
     LOGD("%s(%s) [string]", __FUNCTION__, parameters);
 
@@ -197,26 +190,24 @@ int AbstractedCamera::setParameters(const char* parameters)
     return setParameters(params);
 }
 
-void AbstractedCamera::putParameters(const char* parameters)
+void Camera::putParameters(const char* parameters)
 {
     LOG_FUNCTION_NAME
     CameraParameters params;
 
     String8 str_params(parameters);
     params.unflatten(str_params);
-
-    params.dump();
     setParameters(params);
 }    
 
-int AbstractedCamera::setParameters(const CameraParameters& params)
+int Camera::setParameters(const CameraParameters& params)
 {
     LOGD("%s() [CameraParameters]", __FUNCTION__);
 
     int width, height;
     params.getPreviewSize(&width, &height);
 //    LOGV("setParameters: requested size %d x %d", width, height);
-    mAdapter.setPreviewSize(width, height);
+//    mAdapter->setPreviewSize(width, height);
 
     const char *keys[] = {
         CameraParameters::KEY_SUPPORTED_PREVIEW_SIZES,
@@ -332,13 +323,13 @@ int AbstractedCamera::setParameters(const CameraParameters& params)
 /**************************************************************************
  *  Preview
  *************************************************************************/
-bool AbstractedCamera::isPreviewEnabled()
+bool Camera::isPreviewEnabled()
 {
     LOGD("%s() -> %d", __FUNCTION__, (mPreviewEnabled || mPreviewStartInProgress));
     return (mPreviewEnabled || mPreviewStartInProgress);
 }
 
-status_t AbstractedCamera::setPreviewWindow(struct preview_stream_ops *window)
+status_t Camera::setPreviewWindow(struct preview_stream_ops *window)
 {
     LOG_FUNCTION_NAME;
     status_t ret = NO_ERROR;
@@ -375,7 +366,7 @@ status_t AbstractedCamera::setPreviewWindow(struct preview_stream_ops *window)
         int fps = mParameters.getInt(CameraParameters::KEY_PREVIEW_FRAME_RATE);
         ret = mPreviewWindow->setPreviewDetails(mPreviewWidth, mPreviewHeight, fps);
         if (NO_ERROR != ret) {
-            LOGE("Error setting preview details: %d", ret);
+            LOGE("Error setting preview details: %d [%s]", ret, strerror(ret));
             goto fail;
         }
 
@@ -392,7 +383,7 @@ fail:
     return ret;
 }
 
-status_t AbstractedCamera::startPreview()
+status_t Camera::startPreview()
 {
     LOGD("%s()", __FUNCTION__);
 
@@ -441,11 +432,11 @@ status_t AbstractedCamera::startPreview()
     return ret;
 }
 
-void AbstractedCamera::stopPreview()
+void Camera::stopPreview()
 {
 }
 
-status_t AbstractedCamera::allocPreviewBuffers(int width, int height, 
+status_t Camera::allocPreviewBuffers(int width, int height, 
                                         const char* previewFormat,
                                         unsigned int buffercount, 
                                         unsigned int &max_queueable)
@@ -472,12 +463,6 @@ status_t AbstractedCamera::allocPreviewBuffers(int width, int height,
             return NO_MEMORY;
         }
 
-        mPreviewOffsets = (uint32_t *) mDisplayAdapter->getOffsets();
-        if (NULL == mPreviewOffsets) {
-            LOGE("Buffer mapping failed");
-            return BAD_VALUE;
-        }
-
         mPreviewFd = mDisplayAdapter->getFd();
         if (-1 == mPreviewFd) {
             LOGE("Invalid handle returned from display adapter");
@@ -496,23 +481,19 @@ status_t AbstractedCamera::allocPreviewBuffers(int width, int height,
 }
 
 
-int AbstractedCamera::beginAutoFocusThread(void *cookie)
+int Camera::beginAutoFocusThread(void *cookie)
 {
     LOG_FUNCTION_NAME;
-//    CameraHardwareStub *c = (CameraHardwareStub *)cookie;
-//    return c->autoFocusThread();
     return NO_ERROR;
 }
 
-int AbstractedCamera::autoFocusThread()
+int Camera::autoFocusThread()
 {
     LOG_FUNCTION_NAME;
-//    if (mMsgEnabled & CAMERA_MSG_FOCUS)
-//        mNotifyCb(CAMERA_MSG_FOCUS, true, 0, mCallbackCookie);
     return NO_ERROR;
 }
 
-status_t AbstractedCamera::autoFocus()
+status_t Camera::autoFocus()
 {
     LOG_FUNCTION_NAME;
 //    Mutex::Autolock lock(mLock);
@@ -521,34 +502,34 @@ status_t AbstractedCamera::autoFocus()
     return NO_ERROR;
 }
 
-status_t AbstractedCamera::cancelAutoFocus()
+status_t Camera::cancelAutoFocus()
 {
     LOG_FUNCTION_NAME;
     return NO_ERROR;
 }
 
-status_t AbstractedCamera::takePicture()
+status_t Camera::takePicture()
 {
     return NO_ERROR;
 }
 
-status_t AbstractedCamera::cancelPicture()
+status_t Camera::cancelPicture()
 {
     return NO_ERROR;
 }
 
-void AbstractedCamera::releaseCamera()
+void Camera::releaseCamera()
 {
     LOGV("%s() - not implemented yet", __FUNCTION__);
 }
 
-status_t AbstractedCamera::dumpCamera(int fd)
+status_t Camera::dumpCamera(int fd)
 {
     LOGD("%s(%d) - not implemented yet ", __FUNCTION__, fd);
     return NO_ERROR;
 }
 
-status_t AbstractedCamera::sendCommand(int32_t cmd, int32_t arg1, int32_t arg2)
+status_t Camera::sendCommand(int32_t cmd, int32_t arg1, int32_t arg2)
 {
     LOGV("%s(%d, %d, %d) - not implemented yet ", __FUNCTION__, cmd, arg1, arg2);
     return NO_ERROR;

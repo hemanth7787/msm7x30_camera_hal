@@ -30,8 +30,8 @@
 #include <hardware/camera.h>
 #include <cutils/log.h>
 
-/* The function to actually open a device is in HalDevice.cpp. */
-int camera_device_open(const hw_module_t*, const char *, hw_device_t**);
+#include "Camera.h"
+#include "MsmCamera.h"
 
 #define MAX_SENSORS   5   /* from the msm_camera kernel module */
 static int nCameras = 0;
@@ -76,8 +76,60 @@ static int camera_get_camera_info(int cameraid, struct camera_info *info)
     return rv;
 }
 
+static int camera_device_close(hw_device_t* device)
+{
+    LOGD("%s()", __FUNCTION__);
+
+    if (!device)
+        return -EINVAL;
+    camera_device_t * dev = (camera_device_t *) device;
+
+    if (dev->priv)
+        delete (android::Camera *)(dev->priv);
+
+    free(dev);
+    return 0;
+}
+
+extern camera_device_ops_t generic_camera_ops;
+
+int msm_camera_open(const hw_module_t* module, const char* name,
+                    hw_device_t** device)
+{
+    int cameraid = atoi(name);
+
+    android::Camera *ac = new android::Camera(cameraid);
+    android::MsmCamera *msm = new android::MsmCamera(cameraid, ac);
+        
+    camera_device_t *cameraDev = NULL;
+       
+    LOGD("%s(%s)", __FUNCTION__, name);
+    *device = NULL;
+
+    /* ??? Should we check that the requested camera exists? */
+    cameraDev = (camera_device_t *)malloc(sizeof(*cameraDev));
+    if (!cameraDev) {
+        LOGE("Failed to allocate memory for camera_device_t structure");
+        return -ENOMEM;
+    }
+    /* Set the correct information in the device structure. */
+    memset(cameraDev, 0, sizeof(*cameraDev));
+    cameraDev->common.tag = HARDWARE_DEVICE_TAG;
+    cameraDev->common.version = 0;
+    cameraDev->common.module = (hw_module_t *)(module);
+    cameraDev->common.close = camera_device_close;
+
+    /* Set the function pointers for the camera operations */
+
+    cameraDev->ops = &generic_camera_ops;
+    cameraDev->priv = ac;
+    
+    *device = &cameraDev->common;
+    return 0;
+}
+
 static struct hw_module_methods_t camera_module_methods = {
-    open: camera_device_open
+    open: msm_camera_open
 };
 
 camera_module_t HAL_MODULE_INFO_SYM = {
