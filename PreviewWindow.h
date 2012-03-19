@@ -14,28 +14,26 @@
  * limitations under the License.
  */
 
-#ifndef PREVIEW_WINDOW_H
-#define PREVIEW_WINDOW_H
+#ifndef HW_EMULATOR_CAMERA_PREVIEW_WINDOW_H
+#define HW_EMULATOR_CAMERA_PREVIEW_WINDOW_H
 
 #include <hardware/camera.h>
-
 /*
- * Contains declaration of a class PreviewWindow that encapsulates
- * functionality of a preview window set via set_preview_window 
- * camera HAL API.
+ * Contains declaration of a class PreviewWindow that encapsulates functionality
+ * of a preview window set via set_preview_window camera HAL API.
  */
 
 namespace android {
 
-//class EmulatedCameraDevice;
+class CameraDevice;
 
 /* Encapsulates functionality of a preview window set via set_preview_window
  * camera HAL API.
  *
- * Objects of this class are contained in EmulatedCamera objects, and handle
+ * Objects of this class are contained in Camera objects, and handle
  * relevant camera API callbacks.
  */
-class PreviewWindow : public virtual RefBase {
+class PreviewWindow {
 public:
     /* Constructs PreviewWindow instance. */
     PreviewWindow();
@@ -54,18 +52,15 @@ public:
      * Param:
      *  window - Preview window to set. This parameter might be NULL, which
      *      indicates preview window reset.
-     *  preview_fps - Preview's frame frequency. This parameter determines
-     *                when a frame received via onNextFrameAvailable call
-     *                will be pushed to the preview window. If 'window'
-     *                parameter passed to this method is NULL, this 
-     *                parameter is ignored.
+     *  preview_fps - Preview's frame frequency. This parameter determins when
+     *      a frame received via onNextFrameAvailable call will be pushed to
+     *      the preview window. If 'window' parameter passed to this method is
+     *      NULL, this parameter is ignored.
      * Return:
      *  NO_ERROR on success, or an appropriate error status.
      */
-    status_t setPreviewWindow(struct preview_stream_ops* window);
-
-    /* Allocate a number of buffers. */
-    void *allocateBuffers(int w, int h, const char *fmt, int &nbytes, int nbufs);
+    status_t setPreviewWindow(struct preview_stream_ops* window,
+                              int preview_fps);
 
     /* Starts the preview.
      * This method is called by the containing emulated camera object when it is
@@ -78,18 +73,6 @@ public:
      * handing the camera_device_ops_t::start_preview callback.
      */
     void stopPreview();
-
-    /* Set preview details.
-     * This sets the width and height of the preview frame and also the
-     * frame rate.
-     * fps - Preview's frame frequency. This parameter determines
-     *       when a frame received via onNextFrameAvailable call
-     *       will be pushed to the preview window.
-     * NB These will be reset by subsequent calls to setPreviewWindow()
-     * NB It is assumed that the caller will have checked the values
-     *    supplied are suitable for the sensor.
-     */
-    status_t setPreviewDetails(int w, int h, int fps);
 
     /* Checks if preview is enabled. */
     inline bool isPreviewEnabled()
@@ -115,14 +98,36 @@ public:
      *      returned from the GetCurrentFrame method) is defined by the current
      *      frame settings (width + height + pixel format) for the camera device.
      * timestamp - Frame's timestamp.
+     * camera_dev - Camera device instance that delivered the frame.
      */
-    void onNextFrameAvailable(const void* frame, nsecs_t timestamp);
+    void onNextFrameAvailable(const void* frame,
+                              nsecs_t timestamp,
+                              CameraDevice* camera_dev);
 
     /***************************************************************************
      * Private API
      **************************************************************************/
 
 protected:
+    /* Adjusts cached dimensions of the preview window frame according to the
+     * frame dimensions used by the camera device.
+     *
+     * When preview is started, it's not known (hard to define) what are going
+     * to be the dimensions of the frames that are going to be displayed. Plus,
+     * it might be possible, that such dimensions can be changed on the fly. So,
+     * in order to be always in sync with frame dimensions, this method is
+     * called for each frame passed to onNextFrameAvailable method, in order to
+     * properly adjust frame dimensions, used by the preview window.
+     * Note that this method must be called while object is locked.
+     * Param:
+     *  camera_dev - Camera device, prpviding frames displayed in the preview
+     *      window.
+     * Return:
+     *  true if cached dimensions have been adjusted, or false if cached
+     *  dimensions match device's frame dimensions.
+     */
+    bool adjustPreviewDimensions(CameraDevice* camera_dev);
+
     /* Checks if it's the time to push new frame to the preview window.
      * Note that this method must be called while object is locked. */
     bool isPreviewTime();
@@ -158,4 +163,4 @@ protected:
 
 }; /* namespace android */
 
-#endif  /* PREVIEW_WINDOW_H */
+#endif  /* HW_EMULATOR_CAMERA_PREVIEW_WINDOW_H */

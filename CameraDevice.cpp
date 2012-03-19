@@ -25,18 +25,20 @@
 
 //#define LOG_NDEBUG 0
 #define LOG_TAG "CameraDevice"
-#include <utils/Log.h>
+
 #include <sys/select.h>
 #include <cmath>
+#include <linux/videodev2.h>
+
 #include "Camera.h"
 #include "Converters.h"
+#include "Debug.h"
 
 namespace android {
 
-CameraDevice::CameraDevice(Camera* camera_hal)
+CameraDevice::CameraDevice()
     : mObjectLock(),
       mCurFrameTimestamp(0),
-      mCameraHAL(camera_hal),
       mCurrentFrame(NULL),
       mExposureCompensation(1.0f),
       mState(CDS_CONSTRUCTED)
@@ -56,6 +58,8 @@ CameraDevice::~CameraDevice()
 
 status_t CameraDevice::Initialize()
 {
+    LOG_FUNCTION_NAME
+    
     if (isInitialized()) {
         LOGW("%s:  camera device is already initialized: mState = %d",
              __FUNCTION__, mState);
@@ -76,7 +80,7 @@ status_t CameraDevice::Initialize()
 
 status_t CameraDevice::startDeliveringFrames(bool one_burst)
 {
-    LOGV("%s", __FUNCTION__);
+    LOG_FUNCTION_NAME
 
     if (!isStarted()) {
         LOGE("%s: Device is not started", __FUNCTION__);
@@ -91,7 +95,7 @@ status_t CameraDevice::startDeliveringFrames(bool one_burst)
 
 status_t CameraDevice::stopDeliveringFrames()
 {
-    LOGV("%s", __FUNCTION__);
+    LOG_FUNCTION_NAME
 
     if (!isStarted()) {
         LOGW("%s: Device is not started", __FUNCTION__);

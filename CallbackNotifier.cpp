@@ -19,13 +19,13 @@
  * via set_callbacks, enable_msg_type, and disable_msg_type camera HAL API.
  */
 
-#define LOG_NDEBUG 0
-#define LOG_TAG "EmulatedCamera_CallbackNotifier"
+//#define LOG_NDEBUG 0
+#define LOG_TAG "CallbackNotifier"
 #include <cutils/log.h>
 #include <media/stagefright/MetadataBufferType.h>
-//#include "EmulatedCameraDevice.h"
+#include "CameraDevice.h"
 #include "CallbackNotifier.h"
-//#include "JpegCompressor.h"
+#include "JpegCompressor.h"
 
 namespace android {
 
@@ -203,10 +203,9 @@ void CallbackNotifier::cleanupCBNotifier()
 }
 
 void CallbackNotifier::onNextFrameAvailable(const void* frame,
-                                            nsecs_t timestamp)
-//                                       ,EmulatedCameraDevice* camera_dev)
+                                            nsecs_t timestamp
+                                            ,CameraDevice* camera_dev)
 {
-/*
     if (isMessageEnabled(CAMERA_MSG_VIDEO_FRAME) && isVideoRecordingEnabled() &&
             isNewVideoFrameTime(timestamp)) {
         camera_memory_t* cam_buff =
@@ -231,7 +230,7 @@ void CallbackNotifier::onNextFrameAvailable(const void* frame,
             LOGE("%s: Memory failure in CAMERA_MSG_PREVIEW_FRAME", __FUNCTION__);
         }
     }
-*/
+
     if (mTakingPicture) {
         /* This happens just once. */
         mTakingPicture = false;
@@ -249,7 +248,7 @@ void CallbackNotifier::onNextFrameAvailable(const void* frame,
         if (isMessageEnabled(CAMERA_MSG_COMPRESSED_IMAGE)) {
             /* Compress the frame to JPEG. Note that when taking pictures, we
              * have requested camera device to provide us with NV21 frames. */
-/*
+
             NV21JpegCompressor compressor;
             status_t res =
                 compressor.compressRawImage(frame, camera_dev->getFrameWidth(),
@@ -268,7 +267,6 @@ void CallbackNotifier::onNextFrameAvailable(const void* frame,
             } else {
                 LOGE("%s: Compression failure in CAMERA_MSG_VIDEO_FRAME", __FUNCTION__);
             }
-*/
         }
     }
 }

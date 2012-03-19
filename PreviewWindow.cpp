@@ -16,16 +16,17 @@
 
 /*
  * Contains implementation of a class PreviewWindow that encapsulates
- * functionality of a preview window set via set_preview_window 
- * camera HAL API.
+ * functionality of a preview window set via set_preview_window camera HAL API.
  */
 
+#define LOG_NDEBUG 0
 #define LOG_TAG "PreviewWindow"
-
-#include <utils/Log.h>
+#include <cutils/log.h>
 #include <ui/Rect.h>
 #include <ui/GraphicBufferMapper.h>
+#include "CameraDevice.h"
 #include "PreviewWindow.h"
+#include "Debug.h"
 
 namespace android {
 
@@ -46,7 +47,8 @@ PreviewWindow::~PreviewWindow()
  * Camera API
  ***************************************************************************/
 
-status_t PreviewWindow::setPreviewWindow(struct preview_stream_ops* window)
+status_t PreviewWindow::setPreviewWindow(struct preview_stream_ops* window,
+                                         int preview_fps)
 {
     LOGV("%s: current: %p -> new: %p", __FUNCTION__, mPreviewWindow, window);
 
@@ -63,7 +65,10 @@ status_t PreviewWindow::setPreviewWindow(struct preview_stream_ops* window)
          * Note that we delay setting preview window buffer geometry until
          * frames start to come in. */
         res = window->set_usage(window, GRALLOC_USAGE_SW_WRITE_OFTEN);
-        if (res != NO_ERROR) {
+        if (res == NO_ERROR) {
+            /* Set preview frequency. */
+            mPreviewAfter = 1000000 / preview_fps;
+        } else {
             window = NULL;
             res = -res; // set_usage returns a negative errno.
             LOGE("%s: Error setting preview window usage %d -> %s",
@@ -75,82 +80,61 @@ status_t PreviewWindow::setPreviewWindow(struct preview_stream_ops* window)
     return res;
 }
 
-/* Set the details for the preview frame size and the frame rate. */
-/* ??? Should we also set the format here? */
-status_t PreviewWindow::setPreviewDetails(int w, int h, int fps)
-{
-    Mutex::Autolock locker(&mObjectLock);
-    status_t ret = NO_ERROR;
-
-    if (NULL == mPreviewWindow) {
-        LOGE("You MUST set the window callbacks before settings details.");
-        return BAD_VALUE;
-    }
-    
-//    if (!isPreviewEnabled() || mPreviewWindow == NULL || !isPreviewTime()) {
-//        return BAD_VALUE;
-//    }
-
-    mPreviewFrameWidth = w;
-    mPreviewFrameHeight = h;
-    mPreviewAfter = 1000000 / fps;
-    mLastPreviewed = 0;
-
-    ret = mPreviewWindow->set_buffers_geometry(mPreviewWindow,
-                                               mPreviewFrameWidth,
-                                               mPreviewFrameHeight,
-                                               HAL_PIXEL_FORMAT_RGBA_8888);
-    if (NO_ERROR != ret)
-        LOGD("Unable to set the geometry to %d x %d", w, h);
-    return ret;
-}
-
 status_t PreviewWindow::startPreview()
 {
-    LOGV("%s", __FUNCTION__);
-
+    LOG_FUNCTION_NAME
     Mutex::Autolock locker(&mObjectLock);
     mPreviewEnabled = true;
-
     return NO_ERROR;
 }
 
 void PreviewWindow::stopPreview()
 {
-    LOGV("%s", __FUNCTION__);
-
+    LOG_FUNCTION_NAME
     Mutex::Autolock locker(&mObjectLock);
     mPreviewEnabled = false;
 }
-
-/*
-void *PreviewWindow::allocateBuffers(int width, int height, 
-                                     const char* format, int &bytes, 
-                                     int numBufs)
-{
-    return NULL;
-}
-*/
 
 /****************************************************************************
  * Public API
  ***************************************************************************/
 
 void PreviewWindow::onNextFrameAvailable(const void* frame,
-                                         nsecs_t timestamp)
+                                         nsecs_t timestamp,
+                                         CameraDevice* camera_dev)
 {
     int res;
+    LOG_FUNCTION_NAME
     Mutex::Autolock locker(&mObjectLock);
 
     if (!isPreviewEnabled() || mPreviewWindow == NULL || !isPreviewTime()) {
         return;
     }
+
+    /* Make sure that preview window dimensions are OK with the camera device */
+    if (adjustPreviewDimensions(camera_dev)) {
+        /* Need to set / adjust buffer geometry for the preview window.
+         * Note that in the emulator preview window uses only RGB for pixel
+         * formats. */
+        LOGV("%s: Adjusting preview windows %p geometry to %dx%d",
+             __FUNCTION__, mPreviewWindow, mPreviewFrameWidth,
+             mPreviewFrameHeight);
+        res = mPreviewWindow->set_buffers_geometry(mPreviewWindow,
+                                                   mPreviewFrameWidth,
+                                                   mPreviewFrameHeight,
+                                                   HAL_PIXEL_FORMAT_RGBA_8888);
+        if (res != NO_ERROR) {
+            LOGE("%s: Error in set_buffers_geometry %d -> %s",
+                 __FUNCTION__, -res, strerror(-res));
+            return;
+        }
+    }
+
     /*
      * Push new frame to the preview window.
      */
 
     /* Dequeue preview window buffer for the frame. */
-
     buffer_handle_t* buffer = NULL;
     int stride = 0;
     res = mPreviewWindow->dequeue_buffer(mPreviewWindow, &buffer, &stride);
@@ -161,7 +145,6 @@ void PreviewWindow::onNextFrameAvailable(const void* frame,
     }
 
     /* Let the preview window to lock the buffer. */
-/*
     res = mPreviewWindow->lock_buffer(mPreviewWindow, buffer);
     if (res != NO_ERROR) {
         LOGE("%s: Unable to lock preview window buffer: %d -> %s",
@@ -169,10 +152,9 @@ void PreviewWindow::onNextFrameAvailable(const void* frame,
         mPreviewWindow->cancel_buffer(mPreviewWindow, buffer);
         return;
     }
-*/
+
     /* Now let the graphics framework to lock the buffer, and provide
      * us with the framebuffer data address. */
-/*
     void* img = NULL;
     const Rect rect(mPreviewFrameWidth, mPreviewFrameHeight);
     GraphicBufferMapper& grbuffer_mapper(GraphicBufferMapper::get());
@@ -183,25 +165,39 @@ void PreviewWindow::onNextFrameAvailable(const void* frame,
         mPreviewWindow->cancel_buffer(mPreviewWindow, buffer);
         return;
     }
-*/
+
     /* Frames come in in YV12/NV12/NV21 format. Since preview window doesn't
      * supports those formats, we need to obtain the frame in RGB565. */
-/*    res = camera_dev->getCurrentPreviewFrame(img);
+    res = camera_dev->getCurrentPreviewFrame(img);
     if (res == NO_ERROR) {
-*/
         /* Show it. */
-/*        mPreviewWindow->enqueue_buffer(mPreviewWindow, buffer);
+        mPreviewWindow->enqueue_buffer(mPreviewWindow, buffer);
     } else {
         LOGE("%s: Unable to obtain preview frame: %d", __FUNCTION__, res);
         mPreviewWindow->cancel_buffer(mPreviewWindow, buffer);
     }
     grbuffer_mapper.unlock(*buffer);
-*/
 }
 
 /***************************************************************************
  * Private API
  **************************************************************************/
+
+bool PreviewWindow::adjustPreviewDimensions(CameraDevice* camera_dev)
+{
+    /* Match the cached frame dimensions against the actual ones. */
+    if (mPreviewFrameWidth == camera_dev->getFrameWidth() &&
+        mPreviewFrameHeight == camera_dev->getFrameHeight()) {
+        /* They match. */
+        return false;
+    }
+
+    /* They don't match: adjust the cache. */
+    mPreviewFrameWidth = camera_dev->getFrameWidth();
+    mPreviewFrameHeight = camera_dev->getFrameHeight();
+
+    return true;
+}
 
 bool PreviewWindow::isPreviewTime()
 {

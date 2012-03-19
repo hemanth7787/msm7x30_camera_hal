@@ -28,6 +28,8 @@
 
 namespace android {
 
+class CameraDevice;
+
 /* Manages callbacks set via set_callbacks, enable_msg_type, and disable_msg_type
  * camera HAL API.
  *
@@ -158,9 +160,8 @@ public:
      * camera_dev - Camera device instance that delivered the frame.
      */
     void onNextFrameAvailable(const void* frame,
-                              nsecs_t timestamp);
-//                              ,
-//                              EmulatedCameraDevice* camera_dev);
+                              nsecs_t timestamp,
+                              CameraDevice* camera_dev);
 
     /* Entry point for notifications that occur in camera device.
      * Param:

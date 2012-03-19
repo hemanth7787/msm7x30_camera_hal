@@ -20,25 +20,35 @@ include $(CLEAR_VARS)
 	
 LOCAL_MODULE_PATH := $(TARGET_OUT_SHARED_LIBRARIES)/hw
 LOCAL_MODULE := camera.$(TARGET_BOARD_PLATFORM)
-	
+
+LOCAL_C_INCLUDES += external/jpeg \
+                    external/skia/include/core/ \
+                    frameworks/base/core/jni/android/graphics
+
 LOCAL_MODULE_TAGS := optional
 	
 LOCAL_SRC_FILES := \
     HalModule.cpp \
-    GenericDevice.cpp \
+    CameraFactory.cpp \
     Camera.cpp \
     CameraDevice.cpp \
-    Memory.cpp \
-    ParameterHelper.cpp \
-    CallbackNotifier.cpp \
     PreviewWindow.cpp \
+    CallbackNotifier.cpp \
     MsmCamera.cpp \
-    Converters.cpp
-
+    MsmCameraDevice.cpp \
+    Memory.cpp \
+    Converters.cpp \
+    ParameterHelper.cpp \
+    JpegCompressor.cpp
 
 LOCAL_SHARED_LIBRARIES := liblog libutils libcutils libbinder
 LOCAL_SHARED_LIBRARIES += libui libhardware libcamera_client
 LOCAL_PRELINK_MODULE := false
+
+LOCAL_SHARED_LIBRARIES += \
+        libjpeg \
+        libskia \
+        libandroid_runtime
 
 include $(BUILD_SHARED_LIBRARY)
 	

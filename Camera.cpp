@@ -15,80 +15,31 @@
  * limitations under the License.
  */
 
-#define LOG_TAG "Camera"
+#define LOG_TAG "HalCamera"
+
+#include <linux/videodev2.h>
 
 #include "Camera.h"
 #include "ParameterHelper.h"
+#include "Debug.h"
 
 namespace android {
 
-Camera::Camera(int cameraId) : mCallbackNotifier()
+Camera::Camera(int cameraId, struct hw_module_t* module) 
+       : mPreviewWindow(),
+         mCallbackNotifier(),
+         mCameraID(cameraId)
 {
-    LOGD("%s", __FUNCTION__);
+    LOG_FUNCTION_NAME
   
-    mCameraIndex = cameraId;
-    
-    mPreviewEnabled = false;
-    mPreviewStartInProgress = false;
-    mSetPreviewWindowCalled = false;
-    mPreviewWidth = 0;
-    mPreviewHeight = 0;
-
-    mPictureWidth = 0;
-    mPictureHeight = 0;
-    
-    mDisplayPaused = false;  
-
-    mPreviewBufs = NULL;
-    
-    size_entry_t previews[] = {
-        { 640, 480, "640x480" },
-        { 320, 240, "320x240" }
-    };
-    size_entry_t sizes[] = {
-        { 2048, 1536, "2048x1536" },
-        { 1600, 1200, "1600x1200" },
-        { 1024, 768, "1024x768" }
-    };
-    const char *antibanding[] = { "off", "50hz", "60hz", "auto" };
-    const char *effects[] = { "off", "mono", "negative", "solarize", "sepia",
-                              "posterize", "whiteboard" "blackboard","aqua"};
-    const char *iso[] = { "auto", "high" };
-    const char *scenes[] = { "auto","night","fireworks" };
-    const char *awb[] = { "auto","incandescent","fluorescent","daylight",
-                          "cloudy" };
-    const char *focus[] = { "infinity" };
-    int exp_offset[] = { 0,1,2,3,4,5,6,7,8,9,10 };
-
-#define ARRAY_SIZE(x)   (sizeof((x)) / sizeof((x[0])))
-
-    ParameterHelper helper(&mParameters);   
-    helper.setPreviewSizes(previews, ARRAY_SIZE(previews));
-    helper.setPreviewSize(previews[0]);
-    helper.setPictureSizes(sizes, ARRAY_SIZE(sizes));
-    helper.setPictureSize(sizes[0]);   
-    helper.setStringList(CameraParameters::KEY_SUPPORTED_ANTIBANDING, antibanding, ARRAY_SIZE(antibanding));
-    helper.setStringList(CameraParameters::KEY_SUPPORTED_EFFECTS, effects, ARRAY_SIZE(effects));
-    helper.setStringList(CameraParameters::KEY_SUPPORTED_SCENE_MODES, scenes, ARRAY_SIZE(scenes));
-    helper.setStringList(CameraParameters::KEY_SUPPORTED_WHITE_BALANCE, awb, ARRAY_SIZE(awb));
-    helper.setStringList(CameraParameters::KEY_SUPPORTED_FOCUS_MODES, focus, ARRAY_SIZE(focus));
-
-//    helper.setIntList(CameraParameters::KEY_SUPPORTED_EFFECTS, antibanding);
-
-    /* Set Defaults */    
-    mParameters.setPreviewFrameRate(15);
-    mParameters.setPreviewFormat("yuv420sp");
-    mParameters.setPictureFormat("jpeg");
-    mParameters.set(CameraParameters::KEY_JPEG_QUALITY, 90);
-    mParameters.set(CameraParameters::KEY_JPEG_THUMBNAIL_QUALITY, 90);
-    mParameters.set(CameraParameters::KEY_ANTIBANDING, "auto");
-    mParameters.set(CameraParameters::KEY_WHITE_BALANCE, "auto");
-    mParameters.set(CameraParameters::KEY_ROTATION, 0);
-    mParameters.set(CameraParameters::KEY_FOCUS_MODE, "infinity");
-    mParameters.set(CameraParameters::KEY_SCENE_MODE, 
-                    CameraParameters::SCENE_MODE_AUTO);
-
-//    mAdapter->initialise(cameraId);
+    /* Set the fields needed for the camera_device structure. */
+    common.tag = HARDWARE_DEVICE_TAG;
+    common.version = 0;
+    common.module = module;
+    common.close = Camera::closeDevice;
+    /* camera_device fields. */
+    ops = &mDeviceOps;
+    priv = this;
 }
 
 Camera::~Camera() 
@@ -96,8 +47,75 @@ Camera::~Camera()
     LOG_FUNCTION_NAME;
 }
 
+/* This is called from CameraFactory::cameraDeviceOpen. The Initialization
+ * functions will have been called prior to this being called.
+ */
+status_t Camera::connectCamera(hw_device_t** device)
+{
+    LOG_FUNCTION_NAME
+
+    status_t res = EINVAL;
+    CameraDevice* const camera_dev = getCameraDevice();
+    LOGE_IF(camera_dev == NULL, "%s: No camera device instance.", __FUNCTION__);
+
+    if (camera_dev != NULL) {
+        /* Connect to the camera device. */
+        res = camera_dev->connectDevice();
+        if (res == NO_ERROR) {
+            *device = &common;
+        }
+    }
+    return -res;
+}
+
+status_t Camera::closeCamera()
+{
+    LOG_FUNCTION_NAME
+    return cleanupCamera();
+}
+
+status_t Camera::getCameraInfo(struct camera_info* info)
+{
+    LOG_FUNCTION_NAME
+
+    const char* valstr = NULL;
+
+    valstr = mParameters.get(Camera::KEY_FACING);
+    if (valstr != NULL) {
+        if (strcmp(valstr, Camera::FACING_FRONT) == 0) {
+            info->facing = CAMERA_FACING_FRONT;
+        }
+        else if (strcmp(valstr, Camera::FACING_BACK) == 0) {
+            info->facing = CAMERA_FACING_BACK;
+        }
+    } else {
+        info->facing = CAMERA_FACING_BACK;
+    }
+
+    valstr = mParameters.get(Camera::KEY_ORIENTATION);
+    if (valstr != NULL) {
+        info->orientation = atoi(valstr);
+    } else {
+        info->orientation = 0;
+    }
+
+    return NO_ERROR;
+}
+
+void Camera::onNextFrameAvailable(const void* frame, nsecs_t timestamp,
+                                  CameraDevice* camera_dev)
+{
+    LOG_FUNCTION_NAME
+    
+    /* Notify the preview window first. */
+    mPreviewWindow.onNextFrameAvailable(frame, timestamp, camera_dev);
+
+    /* Notify callback notifier next. */
+    mCallbackNotifier.onNextFrameAvailable(frame, timestamp, camera_dev);
+}
+
 /**************************************************************************
- *  Callbacks
+ *  Callbacks & Messages
  *************************************************************************/
 void Camera::setCallbacks(camera_notify_callback notify_cb,
                              camera_data_callback data_cb,
@@ -122,6 +140,12 @@ void Camera::disableMsgType(int32_t msg_type)
 int Camera::isMsgTypeEnabled(int32_t msg_type)
 {
     return mCallbackNotifier.isMessageEnabled(msg_type);
+}
+
+void Camera::onCameraDeviceError(int err)
+{
+    /* Errors are reported through the callback notifier */
+    mCallbackNotifier.onCameraDeviceError(err);
 }
 
 /**************************************************************************
@@ -157,31 +181,36 @@ void Camera::releaseRecordingFrame(const void* opaque)
     mCallbackNotifier.releaseRecordingFrame(opaque);
 }
 
-/**************************************************************************
+/*************************************************************************
  *  Parameters
  *************************************************************************/
+static char lNoParam = '\0';
 char* Camera::getParameters()
 {
-    String8 params_str8;
-    char* params_string = NULL;
-    const char * valstr = NULL;
+    String8 params(mParameters.flatten());
 
-    LOG_FUNCTION_NAME;
-
-    params_str8 = mParameters.flatten();
-
-    // camera service frees this string...
-    params_string = (char*) malloc(sizeof(char) * (params_str8.length()+1));
-    strcpy(params_string, params_str8.string());
-
-    ///Return the current set of parameters
+    /* The string we return is freed by a call to putParameters() */
+    char *params_string = (char*) malloc(sizeof(char) * (params.length()+1));
+    if (NULL == params_string) {
+        LOGE("%s(): Unable to allocate memory for return string.", 
+             __FUNCTION__);
+        return &lNoParam;
+    }
+    strncpy(params_string, params.string(), params.length() + 1);
     return params_string;
 }
 
+/* Free the parameter string we suppplied via getParameters() */
+void Camera::putParameters(char* params)
+{
+    /* This method simply frees parameters allocated in getParameters(). */
+    if (params != NULL && params != &lNoParam) {
+        free(params);
+    }
+}    
+
 int Camera::setParameters(const char* parameters)
 {
-    LOGD("%s(%s) [string]", __FUNCTION__, parameters);
-
     CameraParameters params;
 
     String8 str_params(parameters);
@@ -190,24 +219,9 @@ int Camera::setParameters(const char* parameters)
     return setParameters(params);
 }
 
-void Camera::putParameters(const char* parameters)
-{
-    LOG_FUNCTION_NAME
-    CameraParameters params;
-
-    String8 str_params(parameters);
-    params.unflatten(str_params);
-    setParameters(params);
-}    
-
 int Camera::setParameters(const CameraParameters& params)
 {
-    LOGD("%s() [CameraParameters]", __FUNCTION__);
-
-    int width, height;
-    params.getPreviewSize(&width, &height);
-//    LOGV("setParameters: requested size %d x %d", width, height);
-//    mAdapter->setPreviewSize(width, height);
+    LOG_FUNCTION_NAME
 
     const char *keys[] = {
         CameraParameters::KEY_SUPPORTED_PREVIEW_SIZES,
@@ -273,30 +287,7 @@ int Camera::setParameters(const CameraParameters& params)
         CameraParameters::KEY_VIDEO_STABILIZATION,
         CameraParameters::KEY_VIDEO_STABILIZATION_SUPPORTED,     
     };
-
-    if (! isPreviewEnabled()) {
-        /* Get the new preview width & hieght */
-        const char *valstr = params.get(CameraParameters::KEY_PREVIEW_SIZE);
-        if (NULL != valstr) {
-            params.getPreviewSize(&mPreviewWidth, &mPreviewHeight);
-            mParameters.setPreviewSize(mPreviewWidth, mPreviewHeight);
-        }
-        /* Get the new preview format */
-        valstr = params.get(CameraParameters::KEY_PREVIEW_FORMAT);
-        if (NULL != valstr)
-            mParameters.setPreviewFormat(valstr);
-        /* Get the picture width & height */
-        valstr = params.get(CameraParameters::KEY_PICTURE_SIZE);
-        if (NULL != valstr) {
-            params.getPreviewSize(&mPictureWidth, &mPictureHeight);
-            mParameters.setPictureSize(mPictureWidth, mPictureHeight);
-        }
-        /* Get the new picture format */
-        valstr = params.get(CameraParameters::KEY_PICTURE_FORMAT);
-        if (NULL != valstr)
-            mParameters.setPictureFormat(valstr);
-    }
-    
+   
     /* We only make changes when we're not in preview mode. */
     if (! isPreviewEnabled()) {
         int nkeys = sizeof(keys) / sizeof(keys[0]);
@@ -311,194 +302,149 @@ int Camera::setParameters(const CameraParameters& params)
     return 0;
 }
 
-/**
-   @brief Returns true if preview is enabled
-
-   @param none
-   @return true  If preview is running currently
-           false If preview has been stopped
-
- */
- 
-/**************************************************************************
+/*************************************************************************
  *  Preview
  *************************************************************************/
-bool Camera::isPreviewEnabled()
+
+int Camera::isPreviewEnabled()
 {
-    LOGD("%s() -> %d", __FUNCTION__, (mPreviewEnabled || mPreviewStartInProgress));
-    return (mPreviewEnabled || mPreviewStartInProgress);
+    LOGD("%s() -> %d", __FUNCTION__, mPreviewWindow.isPreviewEnabled());
+    return mPreviewWindow.isPreviewEnabled();
 }
 
 status_t Camera::setPreviewWindow(struct preview_stream_ops *window)
 {
-    LOG_FUNCTION_NAME;
-    status_t ret = NO_ERROR;
-    mSetPreviewWindowCalled = true;
-
-    /* If we are passed a NULL window pointer then we are being asked to
-     * reset, so if we have created a preview window destroy it here and 
-     * reset our internal flag.
-     */
-    if (NULL == window) {
-        LOGD("NULL window passed, resetting display.");
-        if (mPreviewWindow.get() != NULL)
-            mPreviewWindow.clear();
-        mSetPreviewWindowCalled = false;
-        return ret;
-    }
-    
-    /* If we haven't yet created a preview window object, create it here. */
-    if (NULL == mPreviewWindow.get()) {
-        mPreviewWindow = new PreviewWindow();
-        if(NULL == mPreviewWindow.get()) {
-            LOGD("Failed to create a PreviewWindow object.");
-            return NO_MEMORY;
-        }
-        /* Now we have a PreviewWindow object we need to set the callbacks
-         * it needs to function.
-         */
-        ret  = mPreviewWindow->setPreviewWindow(window);
-
-        if (NO_ERROR != ret) {
-            LOGE("Error setting callbacks for preview window: %d", ret);
-            goto fail;
-        }
-        int fps = mParameters.getInt(CameraParameters::KEY_PREVIEW_FRAME_RATE);
-        ret = mPreviewWindow->setPreviewDetails(mPreviewWidth, mPreviewHeight, fps);
-        if (NO_ERROR != ret) {
-            LOGE("Error setting preview details: %d [%s]", ret, strerror(ret));
-            goto fail;
-        }
-
-        if (mPreviewStartInProgress) {
-            LOGD("setPreviewWindow called when preview running");
-            ret = startPreview();
-        }
-    }
-    /* ??? Should we set the window callbacks here even if we already had
-     *     a preview window object? Does that constitute a reset for the
-     *     object?
-     */
-fail:
-    return ret;
+    return -mPreviewWindow.setPreviewWindow(window,
+                                        mParameters.getPreviewFrameRate());
 }
 
 status_t Camera::startPreview()
 {
-    LOGD("%s()", __FUNCTION__);
+    LOG_FUNCTION_NAME
+    return -doStartPreview();
+}
 
-    if (mPreviewEnabled){
-      LOGD("Preview already running");
-      return ALREADY_EXISTS;
+status_t Camera::doStartPreview()
+{
+    LOG_FUNCTION_NAME
+
+    CameraDevice* camera_dev = getCameraDevice();
+    if (camera_dev->isStarted()) {
+        camera_dev->stopDeliveringFrames();
+        camera_dev->stopDevice();
     }
 
-    /* Update the camera adapter with parameters we'll use... */
-
-    if ((mPreviewStartInProgress == false) && (mDisplayPaused == false)) {
-        /* We need to set the preview sizes here... */
-    }
-    
-    unsigned int required_buffer_count = 4;
-    unsigned int max_queueble_buffers = 4;
-
-    if (!mSetPreviewWindowCalled || (NULL == mPreviewWindow.get())) {
-        LOGD("Preview not started. Preview in progress flag set");
-        mPreviewStartInProgress = true;
-        /* Start the camera adapter */
-        return NO_ERROR;
+    status_t res = mPreviewWindow.startPreview();
+    if (res != NO_ERROR) {
+        return res;
     }
 
-    /* Allocate the preview buffers */
-    status_t ret = allocPreviewBuffers(mPreviewWidth, mPreviewHeight, 
-                                       mParameters.getPreviewFormat(), 
-                                       required_buffer_count, 
-                                       max_queueble_buffers);
+    /* Make sure camera device is connected. */
+    if (!camera_dev->isConnected()) {
+        res = camera_dev->connectDevice();
+        if (res != NO_ERROR) {
+            mPreviewWindow.stopPreview();
+            return res;
+        }
+    }
 
-/*
-    BuffersDescriptor desc;
-    desc.mBuffers = mPreviewBufs;
-    desc.mOffsets = mPreviewOffsets;
-    desc.mFd = mPreviewFd;
-    desc.mLength = mPreviewLength;
-    desc.mCount = ( size_t ) required_buffer_count;
-    desc.mMaxQueueable = (size_t) max_queueble_buffers;
+    int width, height;
+    /* Lets see what should we use for frame width, and height. */
+    if (mParameters.get(CameraParameters::KEY_VIDEO_SIZE) != NULL) {
+        mParameters.getVideoSize(&width, &height);
+    } else {
+        mParameters.getPreviewSize(&width, &height);
+    }
+    /* Lets see what should we use for the frame pixel format. Note that there
+     * are two parameters that define pixel formats for frames sent to the
+     * application via notification callbacks:
+     * - KEY_VIDEO_FRAME_FORMAT, that is used when recording video, and
+     * - KEY_PREVIEW_FORMAT, that is used for preview frame notification.
+     * We choose one or the other, depending on "recording-hint" property set by
+     * the framework that indicating intention: video, or preview. */
+    const char* pix_fmt = NULL;
+    const char* is_video = mParameters.get(Camera::KEY_RECORDING_HINT);
+    if (is_video == NULL) {
+        is_video = CameraParameters::FALSE;
+    }
+    if (strcmp(is_video, CameraParameters::TRUE) == 0) {
+        /* Video recording is requested. Lets see if video frame format is set. */
+        pix_fmt = mParameters.get(CameraParameters::KEY_VIDEO_FRAME_FORMAT);
+    }
+    /* If this was not video recording, or video frame format is not set, lets
+     * use preview pixel format for the main framebuffer. */
+    if (pix_fmt == NULL) {
+        pix_fmt = mParameters.getPreviewFormat();
+    }
+    if (pix_fmt == NULL) {
+        LOGE("%s: Unable to obtain video format", __FUNCTION__);
+        mPreviewWindow.stopPreview();
+        return EINVAL;
+    }
 
-    ret = mAdapter.setBuffers(CameraFrame::PREVIEW_FRAME_SYNC, &desc);
-    LOGD("setBuffers = %d", ret);
-*/    
-    /* lie about what we've done for now... */
-    mPreviewEnabled = true;
-    mPreviewStartInProgress = false;
-    return ret;
+    /* Convert framework's pixel format to the FOURCC one. */
+    uint32_t org_fmt;
+    if (strcmp(pix_fmt, CameraParameters::PIXEL_FORMAT_YUV420P) == 0) {
+        org_fmt = V4L2_PIX_FMT_YUV420;
+    } else if (strcmp(pix_fmt, CameraParameters::PIXEL_FORMAT_RGBA8888) == 0) {
+        org_fmt = V4L2_PIX_FMT_RGB32;
+    } else if (strcmp(pix_fmt, CameraParameters::PIXEL_FORMAT_YUV420SP) == 0) {
+        org_fmt = V4L2_PIX_FMT_NV21;
+    } else {
+        LOGE("%s: Unsupported pixel format %s", __FUNCTION__, pix_fmt);
+        mPreviewWindow.stopPreview();
+        return EINVAL;
+    }
+    LOGD("Starting camera: %dx%d -> %.4s(%s)",
+         width, height, reinterpret_cast<const char*>(&org_fmt), pix_fmt);
+    res = camera_dev->startDevice(width, height, org_fmt);
+    if (res != NO_ERROR) {
+        mPreviewWindow.stopPreview();
+        return res;
+    }
+
+    res = camera_dev->startDeliveringFrames(false);
+    if (res != NO_ERROR) {
+        camera_dev->stopDevice();
+        mPreviewWindow.stopPreview();
+    }
+
+    return res;
 }
 
 void Camera::stopPreview()
 {
+    doStopPreview();
 }
 
-status_t Camera::allocPreviewBuffers(int width, int height, 
-                                        const char* previewFormat,
-                                        unsigned int buffercount, 
-                                        unsigned int &max_queueable)
+status_t Camera::doStopPreview()
 {
-    status_t ret = NO_ERROR;
-    LOG_FUNCTION_NAME;
+    LOG_FUNCTION_NAME
+    status_t res = NO_ERROR;
+    if (mPreviewWindow.isPreviewEnabled()) {
+        /* Stop the camera. */
+        if (getCameraDevice()->isStarted()) {
+            getCameraDevice()->stopDeliveringFrames();
+            res = getCameraDevice()->stopDevice();
+        }
 
-    /* We cannot allocate memory if we don't have a display adapter. */
-/*
-    if(mDisplayAdapter.get() == NULL) {
-        LOGD("There is no display adapter set, unable to allocate buffers");
-        return NO_MEMORY;
+        if (res == NO_ERROR) {
+            /* Disable preview as well. */
+            mPreviewWindow.stopPreview();
+        }
     }
 
-    if(!mPreviewBufs) {
-        mPreviewLength = 0;
-        mPreviewBufs = (int32_t *) mDisplayAdapter->allocateBuffers(width, height,
-                                                                    previewFormat,
-                                                                    mPreviewLength,
-                                                                    buffercount);
-
-	    if (NULL == mPreviewBufs ) {
-            LOGE("Couldn't allocate preview buffers");
-            return NO_MEMORY;
-        }
-
-        mPreviewFd = mDisplayAdapter->getFd();
-        if (-1 == mPreviewFd) {
-            LOGE("Invalid handle returned from display adapter");
-            return BAD_VALUE;
-        }
-
-        mPreviewBufProvider = (BufferProvider*) mDisplayAdapter.get();
-        ret = mDisplayAdapter->maxQueueableBuffers(max_queueable);
-        if (ret != NO_ERROR) {
-            return ret;
-        }
-    }
-*/
-    LOG_FUNCTION_NAME_EXIT;
-    return ret;
-}
-
-
-int Camera::beginAutoFocusThread(void *cookie)
-{
-    LOG_FUNCTION_NAME;
     return NO_ERROR;
 }
 
-int Camera::autoFocusThread()
+/*************************************************************************
+ *  Auto Focus
+ *************************************************************************/
+status_t Camera::setAutoFocus()
 {
-    LOG_FUNCTION_NAME;
-    return NO_ERROR;
-}
+    LOGV("%s", __FUNCTION__);
 
-status_t Camera::autoFocus()
-{
-    LOG_FUNCTION_NAME;
-//    Mutex::Autolock lock(mLock);
-//    if (createThread(beginAutoFocusThread, this) == false)
-//        return UNKNOWN_ERROR;
+    /* TODO: Future enhancements. */
     return NO_ERROR;
 }
 
@@ -508,9 +454,85 @@ status_t Camera::cancelAutoFocus()
     return NO_ERROR;
 }
 
+/*************************************************************************
+ *  Pictures
+ *************************************************************************/
+
 status_t Camera::takePicture()
 {
-    return NO_ERROR;
+    LOG_FUNCTION_NAME
+    
+    status_t res;
+    int width, height;
+    uint32_t org_fmt;
+
+    /* Collect frame info for the picture. */
+    mParameters.getPictureSize(&width, &height);
+    const char* pix_fmt = mParameters.getPictureFormat();
+    if (strcmp(pix_fmt, CameraParameters::PIXEL_FORMAT_YUV420P) == 0) {
+        org_fmt = V4L2_PIX_FMT_YUV420;
+    } else if (strcmp(pix_fmt, CameraParameters::PIXEL_FORMAT_RGBA8888) == 0) {
+        org_fmt = V4L2_PIX_FMT_RGB32;
+    } else if (strcmp(pix_fmt, CameraParameters::PIXEL_FORMAT_YUV420SP) == 0) {
+        org_fmt = V4L2_PIX_FMT_NV21;
+    } else if (strcmp(pix_fmt, CameraParameters::PIXEL_FORMAT_JPEG) == 0) {
+        /* We only have JPEG converted for NV21 format. */
+        org_fmt = V4L2_PIX_FMT_NV21;
+    } else {
+        LOGE("%s: Unsupported pixel format %s", __FUNCTION__, pix_fmt);
+        return EINVAL;
+    }
+    /* Get JPEG quality. */
+    int jpeg_quality = mParameters.getInt(CameraParameters::KEY_JPEG_QUALITY);
+    if (jpeg_quality <= 0) {
+        jpeg_quality = 90;  /* Fall back to default. */
+    }
+
+    /*
+     * Make sure preview is not running, and device is stopped before taking
+     * picture.
+     */
+
+    const bool preview_on = mPreviewWindow.isPreviewEnabled();
+    if (preview_on) {
+        doStopPreview();
+    }
+
+    /* Camera device should have been stopped when the shutter message has been
+     * enabled. */
+    CameraDevice* const camera_dev = getCameraDevice();
+    if (camera_dev->isStarted()) {
+        LOGW("%s: Camera device is started", __FUNCTION__);
+        camera_dev->stopDeliveringFrames();
+        camera_dev->stopDevice();
+    }
+
+    /*
+     * Take the picture now.
+     */
+
+    /* Start camera device for the picture frame. */
+    LOGD("Starting camera for picture: %.4s(%s)[%dx%d]",
+         reinterpret_cast<const char*>(&org_fmt), pix_fmt, width, height);
+    res = camera_dev->startDevice(width, height, org_fmt);
+    if (res != NO_ERROR) {
+        if (preview_on) {
+            doStartPreview();
+        }
+        return res;
+    }
+
+    /* Deliver one frame only. */
+    mCallbackNotifier.setJpegQuality(jpeg_quality);
+    mCallbackNotifier.setTakingPicture(true);
+    res = camera_dev->startDeliveringFrames(true);
+    if (res != NO_ERROR) {
+        mCallbackNotifier.setTakingPicture(false);
+        if (preview_on) {
+            doStartPreview();
+        }
+    }
+    return res;
 }
 
 status_t Camera::cancelPicture()
@@ -518,9 +540,47 @@ status_t Camera::cancelPicture()
     return NO_ERROR;
 }
 
+/*************************************************************************
+ *  Cleanup
+ *************************************************************************/
+
+status_t Camera::cleanupCamera()
+{
+    status_t res = NO_ERROR;
+
+    /* If preview is running - stop it. */
+    res = doStopPreview();
+    if (res != NO_ERROR) {
+        return -res;
+    }
+
+    /* Stop and disconnect the camera device. */
+    CameraDevice* const camera_dev = getCameraDevice();
+    if (camera_dev != NULL) {
+        if (camera_dev->isStarted()) {
+            camera_dev->stopDeliveringFrames();
+            res = camera_dev->stopDevice();
+            if (res != NO_ERROR) {
+                return -res;
+            }
+        }
+        if (camera_dev->isConnected()) {
+            res = camera_dev->disconnectDevice();
+            if (res != NO_ERROR) {
+                return -res;
+            }
+        }
+    }
+
+    mCallbackNotifier.cleanupCBNotifier();
+
+    return NO_ERROR;
+}
+
 void Camera::releaseCamera()
 {
-    LOGV("%s() - not implemented yet", __FUNCTION__);
+    LOG_FUNCTION_NAME
+    cleanupCamera();
 }
 
 status_t Camera::dumpCamera(int fd)
@@ -534,6 +594,314 @@ status_t Camera::sendCommand(int32_t cmd, int32_t arg1, int32_t arg2)
     LOGV("%s(%d, %d, %d) - not implemented yet ", __FUNCTION__, cmd, arg1, arg2);
     return NO_ERROR;
 }
+
+/*************************************************************************
+ * Camera API callbacks as defined by camera_device_ops structure.
+ *
+ * Callbacks here simply dispatch the calls to an appropriate method inside
+ * Camera instance, defined by the 'dev' parameter.
+ *************************************************************************/
+
+int Camera::set_preview_window(struct camera_device* dev,
+                                       struct preview_stream_ops* window)
+{
+    Camera* ec = reinterpret_cast<Camera*>(dev->priv);
+    if (ec == NULL) {
+        LOGE("%s: Unexpected NULL camera device", __FUNCTION__);
+        return -EINVAL;
+    }
+    return ec->setPreviewWindow(window);
+}
+
+void Camera::set_callbacks(
+        struct camera_device* dev,
+        camera_notify_callback notify_cb,
+        camera_data_callback data_cb,
+        camera_data_timestamp_callback data_cb_timestamp,
+        camera_request_memory get_memory,
+        void* user)
+{
+    Camera* ec = reinterpret_cast<Camera*>(dev->priv);
+    if (ec == NULL) {
+        LOGE("%s: Unexpected NULL camera device", __FUNCTION__);
+        return;
+    }
+    ec->setCallbacks(notify_cb, data_cb, data_cb_timestamp, get_memory, user);
+}
+
+void Camera::enable_msg_type(struct camera_device* dev, int32_t msg_type)
+{
+    Camera* ec = reinterpret_cast<Camera*>(dev->priv);
+    if (ec == NULL) {
+        LOGE("%s: Unexpected NULL camera device", __FUNCTION__);
+        return;
+    }
+    ec->enableMsgType(msg_type);
+}
+
+void Camera::disable_msg_type(struct camera_device* dev, int32_t msg_type)
+{
+    Camera* ec = reinterpret_cast<Camera*>(dev->priv);
+    if (ec == NULL) {
+        LOGE("%s: Unexpected NULL camera device", __FUNCTION__);
+        return;
+    }
+    ec->disableMsgType(msg_type);
+}
+
+int Camera::msg_type_enabled(struct camera_device* dev, int32_t msg_type)
+{
+    Camera* ec = reinterpret_cast<Camera*>(dev->priv);
+    if (ec == NULL) {
+        LOGE("%s: Unexpected NULL camera device", __FUNCTION__);
+        return -EINVAL;
+    }
+    return ec->isMsgTypeEnabled(msg_type);
+}
+
+int Camera::start_preview(struct camera_device* dev)
+{
+    LOG_FUNCTION_NAME
+    Camera* ec = reinterpret_cast<Camera*>(dev->priv);
+    if (ec == NULL) {
+        LOGE("%s: Unexpected NULL camera device", __FUNCTION__);
+        return -EINVAL;
+    }
+    return ec->startPreview();
+}
+
+void Camera::stop_preview(struct camera_device* dev)
+{
+    Camera* ec = reinterpret_cast<Camera*>(dev->priv);
+    if (ec == NULL) {
+        LOGE("%s: Unexpected NULL camera device", __FUNCTION__);
+        return;
+    }
+    ec->stopPreview();
+}
+
+int Camera::preview_enabled(struct camera_device* dev)
+{
+    Camera* ec = reinterpret_cast<Camera*>(dev->priv);
+    if (ec == NULL) {
+        LOGE("%s: Unexpected NULL camera device", __FUNCTION__);
+        return -EINVAL;
+    }
+    return ec->isPreviewEnabled();
+}
+
+int Camera::store_meta_data_in_buffers(struct camera_device* dev,
+                                               int enable)
+{
+    Camera* ec = reinterpret_cast<Camera*>(dev->priv);
+    if (ec == NULL) {
+        LOGE("%s: Unexpected NULL camera device", __FUNCTION__);
+        return -EINVAL;
+    }
+    return ec->storeMetaDataInBuffers(enable);
+}
+
+int Camera::start_recording(struct camera_device* dev)
+{
+    Camera* ec = reinterpret_cast<Camera*>(dev->priv);
+    if (ec == NULL) {
+        LOGE("%s: Unexpected NULL camera device", __FUNCTION__);
+        return -EINVAL;
+    }
+    return ec->startRecording();
+}
+
+void Camera::stop_recording(struct camera_device* dev)
+{
+    Camera* ec = reinterpret_cast<Camera*>(dev->priv);
+    if (ec == NULL) {
+        LOGE("%s: Unexpected NULL camera device", __FUNCTION__);
+        return;
+    }
+    ec->stopRecording();
+}
+
+int Camera::recording_enabled(struct camera_device* dev)
+{
+    Camera* ec = reinterpret_cast<Camera*>(dev->priv);
+    if (ec == NULL) {
+        LOGE("%s: Unexpected NULL camera device", __FUNCTION__);
+        return -EINVAL;
+    }
+    return ec->isRecordingEnabled();
+}
+
+void Camera::release_recording_frame(struct camera_device* dev,
+                                             const void* opaque)
+{
+    Camera* ec = reinterpret_cast<Camera*>(dev->priv);
+    if (ec == NULL) {
+        LOGE("%s: Unexpected NULL camera device", __FUNCTION__);
+        return;
+    }
+    ec->releaseRecordingFrame(opaque);
+}
+
+int Camera::auto_focus(struct camera_device* dev)
+{
+    Camera* ec = reinterpret_cast<Camera*>(dev->priv);
+    if (ec == NULL) {
+        LOGE("%s: Unexpected NULL camera device", __FUNCTION__);
+        return -EINVAL;
+    }
+    return ec->setAutoFocus();
+}
+
+int Camera::cancel_auto_focus(struct camera_device* dev)
+{
+    Camera* ec = reinterpret_cast<Camera*>(dev->priv);
+    if (ec == NULL) {
+        LOGE("%s: Unexpected NULL camera device", __FUNCTION__);
+        return -EINVAL;
+    }
+    return ec->cancelAutoFocus();
+}
+
+int Camera::take_picture(struct camera_device* dev)
+{
+    Camera* ec = reinterpret_cast<Camera*>(dev->priv);
+    if (ec == NULL) {
+        LOGE("%s: Unexpected NULL camera device", __FUNCTION__);
+        return -EINVAL;
+    }
+    return ec->takePicture();
+}
+
+int Camera::cancel_picture(struct camera_device* dev)
+{
+    Camera* ec = reinterpret_cast<Camera*>(dev->priv);
+    if (ec == NULL) {
+        LOGE("%s: Unexpected NULL camera device", __FUNCTION__);
+        return -EINVAL;
+    }
+    return ec->cancelPicture();
+}
+
+int Camera::set_parameters(struct camera_device* dev, const char* parms)
+{
+    Camera* ec = reinterpret_cast<Camera*>(dev->priv);
+    if (ec == NULL) {
+        LOGE("%s: Unexpected NULL camera device", __FUNCTION__);
+        return -EINVAL;
+    }
+    return ec->setParameters(parms);
+}
+
+char* Camera::get_parameters(struct camera_device* dev)
+{
+    Camera* ec = reinterpret_cast<Camera*>(dev->priv);
+    if (ec == NULL) {
+        LOGE("%s: Unexpected NULL camera device", __FUNCTION__);
+        return NULL;
+    }
+    return ec->getParameters();
+}
+
+void Camera::put_parameters(struct camera_device* dev, char* params)
+{
+    Camera* ec = reinterpret_cast<Camera*>(dev->priv);
+    if (ec == NULL) {
+        LOGE("%s: Unexpected NULL camera device", __FUNCTION__);
+        return;
+    }
+    ec->putParameters(params);
+}
+
+int Camera::send_command(struct camera_device* dev,
+                                 int32_t cmd,
+                                 int32_t arg1,
+                                 int32_t arg2)
+{
+    Camera* ec = reinterpret_cast<Camera*>(dev->priv);
+    if (ec == NULL) {
+        LOGE("%s: Unexpected NULL camera device", __FUNCTION__);
+        return -EINVAL;
+    }
+    return ec->sendCommand(cmd, arg1, arg2);
+}
+
+void Camera::release(struct camera_device* dev)
+{
+    Camera* ec = reinterpret_cast<Camera*>(dev->priv);
+    if (ec == NULL) {
+        LOGE("%s: Unexpected NULL camera device", __FUNCTION__);
+        return;
+    }
+    ec->releaseCamera();
+}
+
+int Camera::dump(struct camera_device* dev, int fd)
+{
+    Camera* ec = reinterpret_cast<Camera*>(dev->priv);
+    if (ec == NULL) {
+        LOGE("%s: Unexpected NULL camera device", __FUNCTION__);
+        return -EINVAL;
+    }
+    return ec->dumpCamera(fd);
+}
+
+int Camera::closeDevice(struct hw_device_t* device)
+{
+    Camera* ec = reinterpret_cast<Camera*>(reinterpret_cast<struct camera_device*>(device)->priv);
+    if (ec == NULL) {
+        LOGE("%s: Unexpected NULL camera device", __FUNCTION__);
+        return -EINVAL;
+    }
+    return ec->closeCamera();
+}
+
+/*************************************************************************
+ * Static initializer for the camera callback API
+ *************************************************************************/
+camera_device_ops_t Camera::mDeviceOps = {
+    Camera::set_preview_window,
+    Camera::set_callbacks,
+    Camera::enable_msg_type,
+    Camera::disable_msg_type,
+    Camera::msg_type_enabled,
+    Camera::start_preview,
+    Camera::stop_preview,
+    Camera::preview_enabled,
+    Camera::store_meta_data_in_buffers,
+    Camera::start_recording,
+    Camera::stop_recording,
+    Camera::recording_enabled,
+    Camera::release_recording_frame,
+    Camera::auto_focus,
+    Camera::cancel_auto_focus,
+    Camera::take_picture,
+    Camera::cancel_picture,
+    Camera::set_parameters,
+    Camera::get_parameters,
+    Camera::put_parameters,
+    Camera::send_command,
+    Camera::release,
+    Camera::dump
+};
+
+
+
+/****************************************************************************
+ * Common keys
+ ***************************************************************************/
+
+const char Camera::KEY_FACING[]         = "prop-facing";
+const char Camera::KEY_ORIENTATION[]    = "prop-orientation";
+const char Camera::KEY_RECORDING_HINT[] = "recording-hint";
+const char Camera::KEY_ISO[] = "iso";
+
+/****************************************************************************
+ * Common string values
+ ***************************************************************************/
+
+const char Camera::FACING_BACK[]      = "back";
+const char Camera::FACING_FRONT[]     = "front";
+
 
 } /* ! namespace android */
 

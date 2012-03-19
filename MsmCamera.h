@@ -15,62 +15,54 @@
  * limitations under the License.
  */
 
+/* The MsmCamera class is a wrapper around the Camera class that allows us
+ * to add some camera specific initialisation and to link an instance of
+ * the MsmCameraDevice class.
+ *
+ * The actual device specific code lives in the the MsmCameraDevice class.
+ */
 
 #ifndef MSM_CAMERA_H
 #define MSM_CAMERA_H
 
 #include "Camera.h"
-#include "msm_camera.h"
-#include "Memory.h"
+#include "MsmCameraDevice.h"
 
 namespace android {
 
-class MsmCamera : public CameraDevice
+class MsmCamera : public Camera
 {
-    typedef enum {
-        MSM_CONFIG,     /* configuration */
-        MSM_CONTROL,    /* control */
-        MSM_FB          /* framebuffer */
-    } msm_endpoint_e;
-
     public:
-        MsmCamera(int id, Camera *cam);
+        MsmCamera(int cameraId, struct hw_module_t *module);
 
-        status_t connectDevice();
-        status_t disconnectDevice();
-        status_t startDevice(int width, int height, uint32_t pix_fmt);
-        status_t stopDevice();
+        /* Destructor */
+        ~MsmCamera();
 
-    public:
-        /* API for this class */
-        bool configIoctl(int cmd, void *ptr);
-        bool controlIoctl(int cmd, void *ptr);
-        bool configCommand(int cmd, void *ptr);
-        bool controlCommand(uint16_t type, void *ptr, uint16_t ptrlen);
-
-    private:
-        int openEndpoint(msm_endpoint_e which);
-
-        /* Functions to extract information from the sensor. */
-        bool getVendorId();
-        bool getSensorInformation();
-        /* Control memory allocations for sensor operation */
-        bool setupMemory();
-        void removeMemory();
-        /* Issue ioctl requests with suitable checks */
-        bool __ioctl(int which, int cmd, void *ptr);
-
-    private:
-        int mCameraId;   /* The camera id. */
+        int getCameraId() const { return mCameraID; }
         
-        /* Kernel access points */
-        int mControlFd;
-        int mConfigFd;
-        /* Sensor information */
-        struct msm_camsensor_info mSensorInfo;
-        int mVendorId;
-        /* Sensor memory pool */
-        PhysicalMemoryPool *mSetupMemory;
+    /*********************************************************************
+     * Camera virtual overrides.
+     *********************************************************************/
+
+    public:
+        /* Initializes an MsmCamera instance. */
+        status_t Initialize();
+
+    /*********************************************************************
+     * Camera abstract API implementation.
+     *********************************************************************/
+
+    protected:
+        /* Gets the camera device used by this instance of the camera. */
+        CameraDevice* getCameraDevice();
+
+    /*********************************************************************
+     * Data memebers.
+     *********************************************************************/
+
+    protected:
+        /* Contained fake camera device object. */
+        MsmCameraDevice    mCameraDevice;
 
 };
 

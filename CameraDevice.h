@@ -32,8 +32,6 @@
 
 namespace android {
 
-class Camera;
-
 /* The AbsractedCameraDevice class encapsulates an abstract class that aims
  * to provide the functionality needed from a phsical camera device.
  */
@@ -44,7 +42,7 @@ public:
      *  camera_hal -  camera that implements the camera HAL API,
      *               and manages (contains) this object.
      */
-    explicit CameraDevice(Camera* camera_hal);
+    explicit CameraDevice();
 
     /* Destructs CameraDevice instance. */
     virtual ~CameraDevice();
@@ -445,9 +443,6 @@ protected:
 
     /* Timestamp of the current frame. */
     nsecs_t                     mCurFrameTimestamp;
-
-    /* Camera object containing this instance. */
-    Camera*             mCameraHAL;
 
     /* Framebuffer containing the current frame. */
     uint8_t*                    mCurrentFrame;
