@@ -20,10 +20,9 @@
  * camera HAL API.
  */
 
-//#define LOG_NDEBUG 0
 #define LOG_TAG "PreviewWindow"
 
-#include <cutils/log.h>
+#include <utils/Log.h>
 #include <ui/Rect.h>
 #include <ui/GraphicBufferMapper.h>
 #include "PreviewWindow.h"
@@ -82,10 +81,15 @@ status_t PreviewWindow::setPreviewDetails(int w, int h, int fps)
 {
     Mutex::Autolock locker(&mObjectLock);
     status_t ret = NO_ERROR;
-    
-    if (!isPreviewEnabled() || mPreviewWindow == NULL || !isPreviewTime()) {
+
+    if (NULL == mPreviewWindow) {
+        LOGE("You MUST set the window callbacks before settings details.");
         return BAD_VALUE;
     }
+    
+//    if (!isPreviewEnabled() || mPreviewWindow == NULL || !isPreviewTime()) {
+//        return BAD_VALUE;
+//    }
 
     mPreviewFrameWidth = w;
     mPreviewFrameHeight = h;

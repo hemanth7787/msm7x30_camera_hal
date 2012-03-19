@@ -28,8 +28,6 @@
 
 namespace android {
 
-class EmulatedCameraDevice;
-
 /* Manages callbacks set via set_callbacks, enable_msg_type, and disable_msg_type
  * camera HAL API.
  *
