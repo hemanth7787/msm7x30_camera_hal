@@ -50,7 +50,7 @@ PreviewWindow::~PreviewWindow()
 status_t PreviewWindow::setPreviewWindow(struct preview_stream_ops* window,
                                          int preview_fps)
 {
-    LOGV("%s: current: %p -> new: %p", __FUNCTION__, mPreviewWindow, window);
+    LOGV("%s(): current: %p -> new: %p", __FUNCTION__, mPreviewWindow, window);
 
     status_t res = NO_ERROR;
     Mutex::Autolock locker(&mObjectLock);
@@ -104,7 +104,7 @@ void PreviewWindow::onNextFrameAvailable(const void* frame,
                                          CameraDevice* camera_dev)
 {
     int res;
-    LOG_FUNCTION_NAME
+//    LOG_FUNCTION_NAME
     Mutex::Autolock locker(&mObjectLock);
 
     if (!isPreviewEnabled() || mPreviewWindow == NULL || !isPreviewTime()) {

@@ -71,6 +71,12 @@ class MsmCameraDevice : public CameraDevice
         bool __ioctl(int which, int cmd, void *ptr);
 
 bool inWorkerThread();
+
+
+    /*********************************************************************
+     * Data memebers.
+     *********************************************************************/
+
     private:
         MsmCamera *mCamera;
                
@@ -87,6 +93,12 @@ bool inWorkerThread();
 private:
     /* Draws a black and white checker board in the current frame buffer. */
     void drawCheckerboard();
+
+#if EFCD_ROTATE_FRAME
+    void drawSolid(YUVPixel* color);
+    void drawStripes();
+    int rotateFrame();
+#endif  // EFCD_ROTATE_FRAME
 
     /* Draws a square of the given color in the current frame buffer.
      * Param:

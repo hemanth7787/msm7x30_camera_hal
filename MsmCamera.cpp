@@ -23,17 +23,6 @@
 
 namespace android {
 
-MsmCamera::MsmCamera(int cameraId, struct hw_module_t *module) 
-          : Camera(cameraId, module), mCameraDevice(this)
-{
-    LOG_FUNCTION_NAME
-}
-
-MsmCamera::~MsmCamera()
-{
-    LOG_FUNCTION_NAME
-}
-
 /* This is called prior to the object being made available to the system,
  * so information required for the camera_info structure should be
  * set here (if possible).
@@ -49,7 +38,10 @@ status_t MsmCamera::Initialize()
     /* ??? - is there any way we can determine this form the hardware? */
     mParameters.set(Camera::KEY_FACING, Camera::FACING_BACK);
     mParameters.set(Camera::KEY_ORIENTATION, 90);
-    
+
+    /* TODO - move these as they should be sensor specific and don't need
+     * to be set at this point.
+     */    
     size_entry_t previews[] = {
         { 640, 480, "640x480" },
         { 320, 240, "320x240" }
@@ -82,12 +74,17 @@ status_t MsmCamera::Initialize()
     helper.setPreviewSize(previews[0]);
     helper.setPictureSizes(sizes, ARRAY_SIZE(sizes));
     helper.setPictureSize(sizes[0]);
-      
-    helper.setStringList(CameraParameters::KEY_SUPPORTED_ANTIBANDING, antibanding, ARRAY_SIZE(antibanding));
-    helper.setStringList(CameraParameters::KEY_SUPPORTED_EFFECTS, effects, ARRAY_SIZE(effects));
-    helper.setStringList(CameraParameters::KEY_SUPPORTED_SCENE_MODES, scenes, ARRAY_SIZE(scenes));
-    helper.setStringList(CameraParameters::KEY_SUPPORTED_WHITE_BALANCE, awb, ARRAY_SIZE(awb));
-    helper.setStringList(CameraParameters::KEY_SUPPORTED_FOCUS_MODES, focus, ARRAY_SIZE(focus));
+
+    helper.setStringList(CameraParameters::KEY_SUPPORTED_ANTIBANDING, 
+                         antibanding, ARRAY_SIZE(antibanding));
+    helper.setStringList(CameraParameters::KEY_SUPPORTED_EFFECTS, 
+                         effects, ARRAY_SIZE(effects));
+    helper.setStringList(CameraParameters::KEY_SUPPORTED_SCENE_MODES, 
+                         scenes, ARRAY_SIZE(scenes));
+    helper.setStringList(CameraParameters::KEY_SUPPORTED_WHITE_BALANCE, 
+                         awb, ARRAY_SIZE(awb));
+    helper.setStringList(CameraParameters::KEY_SUPPORTED_FOCUS_MODES, 
+                         focus, ARRAY_SIZE(focus));
     helper.setStringList(Camera::KEY_ISO, iso, ARRAY_SIZE(iso));
 
     /* Set Defaults */    
@@ -102,14 +99,10 @@ status_t MsmCamera::Initialize()
     mParameters.set(CameraParameters::KEY_FOCUS_MODE, "infinity");
     mParameters.set(CameraParameters::KEY_SCENE_MODE, 
                     CameraParameters::SCENE_MODE_AUTO);
+    mParameters.set(CameraParameters::KEY_ZOOM_SUPPORTED, "true");
 
 
     return res;
-}
-
-CameraDevice* MsmCamera::getCameraDevice()
-{
-    return &mCameraDevice;
 }
 
 } /* ! namespace android */

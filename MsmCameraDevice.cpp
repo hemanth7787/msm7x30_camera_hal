@@ -28,11 +28,30 @@ void *config_thread(void *data);
 
 namespace android {
 
-MsmCameraDevice::MsmCameraDevice(MsmCamera *camera) : mCamera(camera)
+MsmCameraDevice::MsmCameraDevice(MsmCamera *camera) 
+               : mCamera(camera), mBlackYUV(kBlack32), mWhiteYUV(kWhite32),
+                 mRedYUV(kRed8), mGreenYUV(kGreen8), mBlueYUV(kBlue8)
 {
     mVendorId = -1;
     mConfigFd = -1;
     mControlFd = -1;   
+
+    mLastRedrawn = 0;
+    mCheckX = 0;
+    mCheckY = 0;
+    mCcounter = 0;
+#if EFCD_ROTATE_FRAME
+    mLastRotatedAt = 0;
+    mCurrentFrameType = 0;
+    mCurrentColor = &mWhiteYUV;
+#endif  // EFCD_ROTATE_FRAME
+
+    mBlackYUV.Y = mBlackYUV.Y / 4;
+    mWhiteYUV.Y = mWhiteYUV.Y / 4;
+    mRedYUV.Y = mRedYUV.Y / 4;
+    mGreenYUV.Y = mGreenYUV.Y / 4;
+    mBlueYUV.Y = mBlueYUV.Y / 4;
+
 }
 
 
@@ -446,10 +465,7 @@ bool MsmCameraDevice::inWorkerThread()
 
     /* Lets see if we need to generate a new frame. */
     if ((systemTime(SYSTEM_TIME_MONOTONIC) - mLastRedrawn) >= mRedrawAfter) {
-        /*
-         * Time to generate a new frame.
-         */
-
+        /* Time to generate a new frame. */
 #if EFCD_ROTATE_FRAME
         const int frame_type = rotateFrame();
         switch (frame_type) {
@@ -545,13 +561,15 @@ void MsmCameraDevice::drawCheckerboard()
     mCcounter++;
 }
 
-void MsmCameraDevice::drawSquare(int x,
-                                          int y,
-                                          int size,
-                                          const YUVPixel* color)
-{
-#define min(a,b) (a <= b ? a : b)
+    template <class T> const T &
+    min( const T &a, const T &b )
+    {
+        return (a < b) ? a : b;
+    }
 
+void MsmCameraDevice::drawSquare(int x, int y, int size,
+                                 const YUVPixel* color)
+{
     const int square_xstop = min(mFrameWidth, x + size);
     const int square_ystop = min(mFrameHeight, y + size);
     uint8_t* Y_pos = mCurrentFrame + y * mFrameWidth + x;

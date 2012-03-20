@@ -105,11 +105,10 @@ status_t Camera::getCameraInfo(struct camera_info* info)
 void Camera::onNextFrameAvailable(const void* frame, nsecs_t timestamp,
                                   CameraDevice* camera_dev)
 {
-    LOG_FUNCTION_NAME
+//    LOG_FUNCTION_NAME
     
     /* Notify the preview window first. */
     mPreviewWindow.onNextFrameAvailable(frame, timestamp, camera_dev);
-
     /* Notify callback notifier next. */
     mCallbackNotifier.onNextFrameAvailable(frame, timestamp, camera_dev);
 }
@@ -363,7 +362,7 @@ status_t Camera::doStartPreview()
      * We choose one or the other, depending on "recording-hint" property set by
      * the framework that indicating intention: video, or preview. */
     const char* pix_fmt = NULL;
-    const char* is_video = mParameters.get(Camera::KEY_RECORDING_HINT);
+    const char* is_video = mParameters.get(CameraParameters::KEY_RECORDING_HINT);
     if (is_video == NULL) {
         is_video = CameraParameters::FALSE;
     }
@@ -892,7 +891,6 @@ camera_device_ops_t Camera::mDeviceOps = {
 
 const char Camera::KEY_FACING[]         = "prop-facing";
 const char Camera::KEY_ORIENTATION[]    = "prop-orientation";
-const char Camera::KEY_RECORDING_HINT[] = "recording-hint";
 const char Camera::KEY_ISO[] = "iso";
 
 /****************************************************************************

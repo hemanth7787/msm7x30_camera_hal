@@ -391,7 +391,6 @@ protected:
     public:
         static const char KEY_FACING[];
         static const char KEY_ORIENTATION[];
-        static const char KEY_RECORDING_HINT[];
         static const char KEY_ISO[];
 
         /* Possible values for FACING_KEY */

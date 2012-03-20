@@ -23,7 +23,7 @@
  *  - etc.
  */
 
-//#define LOG_NDEBUG 0
+#define LOG_NDEBUG 0
 #define LOG_TAG "CameraDevice"
 
 #include <sys/select.h>
@@ -111,7 +111,7 @@ void CameraDevice::setExposureCompensation(const float ev) {
     LOGV("%s", __FUNCTION__);
 
     if (!isStarted()) {
-        LOGW("%s: Fake camera device is not started.", __FUNCTION__);
+        LOGW("%s: Camera device is not started.", __FUNCTION__);
     }
 
     mExposureCompensation = std::pow(2.0f, ev);
@@ -155,9 +155,8 @@ status_t CameraDevice::getCurrentPreviewFrame(void* buffer)
  *  camera device private API
  ***************************************************************************/
 
-status_t CameraDevice::commonStartDevice(int width,
-                                                 int height,
-                                                 uint32_t pix_fmt)
+status_t CameraDevice::commonStartDevice(int width, int height,
+                                         uint32_t pix_fmt)
 {
     /* Validate pixel format, and calculate framebuffer size at the same time. */
     switch (pix_fmt) {
@@ -306,13 +305,18 @@ status_t CameraDevice::WorkerThread::stopThread()
     return res;
 }
 
+template <class T> const T &
+max( const T &a, const T &b )
+{
+    return (a > b) ? a : b;
+}
+
+
 CameraDevice::WorkerThread::SelectRes
 CameraDevice::WorkerThread::Select(int fd, int timeout)
 {
     fd_set fds[1];
     struct timeval tv, *tvp = NULL;
-
-#define max(a,b)  ((a >= b) ? a : b)
 
     const int fd_num = (fd >= 0) ? max(fd, mControlFD) + 1 : mControlFD + 1;
     FD_ZERO(fds);

@@ -33,10 +33,13 @@ namespace android {
 class MsmCamera : public Camera
 {
     public:
-        MsmCamera(int cameraId, struct hw_module_t *module);
+        MsmCamera(int cameraId, struct hw_module_t *module) 
+                 : Camera(cameraId, module), mCameraDevice(this) {};
+                 
+//        MsmCamera(int cameraId, struct hw_module_t *module);
 
         /* Destructor */
-        ~MsmCamera();
+        //~MsmCamera();
 
         int getCameraId() const { return mCameraID; }
         
@@ -54,7 +57,7 @@ class MsmCamera : public Camera
 
     protected:
         /* Gets the camera device used by this instance of the camera. */
-        CameraDevice* getCameraDevice();
+        CameraDevice* getCameraDevice() { return &mCameraDevice; };
 
     /*********************************************************************
      * Data memebers.
