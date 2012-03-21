@@ -22,14 +22,13 @@
 
 #include "MsmCamera.h"
 #include "Debug.h"
-
-static pthread_t cfg_thread;
-void *config_thread(void *data);
+#include "msm_camera.h"
 
 namespace android {
 
 MsmCameraDevice::MsmCameraDevice(MsmCamera *camera) 
-               : mCamera(camera), mBlackYUV(kBlack32), mWhiteYUV(kWhite32),
+               : mCamera(camera),
+                 mBlackYUV(kBlack32), mWhiteYUV(kWhite32),
                  mRedYUV(kRed8), mGreenYUV(kGreen8), mBlueYUV(kBlue8)
 {
     mVendorId = -1;
@@ -53,7 +52,6 @@ MsmCameraDevice::MsmCameraDevice(MsmCamera *camera)
     mBlueYUV.Y = mBlueYUV.Y / 4;
 
 }
-
 
 status_t MsmCameraDevice::connectDevice()
 {
@@ -100,7 +98,15 @@ status_t MsmCameraDevice::connectDevice()
         close(mControlFd);
         return BAD_VALUE;
     }
-               
+
+    mConfigThread = new ConfigThread(this);
+    if (getConfigThread() == NULL) {
+        LOGE("%s: Unable to instantiate config thread object", __FUNCTION__);
+        close(mConfigFd);
+        close(mControlFd);
+        return ENOMEM;
+    }
+
     mState = CDS_CONNECTED;
     return NO_ERROR;
 }
@@ -134,14 +140,6 @@ status_t MsmCameraDevice::disconnectDevice()
  */
 status_t MsmCameraDevice::startDevice(int width, int height, uint32_t pix_fmt)
 {
-    /* We need to start a thread to deal with configuration issues, so
-     * do this here.
-     */
-//    if (pthread_create(&cfg_thread, NULL, config_thread, (void *)this) != 0) {
-//        LOGE("Camera open thread creation failed");
-//        return INVALID_OPERATION;
-//    }
-
     Mutex::Autolock locker(&mObjectLock);
     if (!isConnected()) {
         LOGE("%s: Fake camera device is not connected.", __FUNCTION__);
@@ -152,8 +150,22 @@ status_t MsmCameraDevice::startDevice(int width, int height, uint32_t pix_fmt)
         return EINVAL;
     }
 
+    
     /* Initialize the base class. */
-    const status_t res = CameraDevice::commonStartDevice(width, height, pix_fmt);
+    status_t res = CameraDevice::commonStartDevice(width, height, pix_fmt);
+    if (res != NO_ERROR) {
+        LOGE("Unable to start device...");
+        return res;
+    }
+    res = getConfigThread()->startThread();
+    LOGE_IF(res != NO_ERROR, "%s: Unable to start config thread", __FUNCTION__);
+
+    /* try and enable some things for the camera */
+    disableStats();
+    enableAEC();
+    enableAF();
+    enableAWB();
+    
     if (res == NO_ERROR) {
         /* Calculate U/V panes inside the framebuffer. */
         switch (mPixelFormat) {
@@ -241,51 +253,6 @@ bool MsmCameraDevice::configCommand(int cmd, void *ptr)
 {
     if (__ioctl(IOCTL_CONFIG, cmd, ptr))
         return true;       
-    LOGE("configCommand failed. Error: %s", strerror(errno));
-    return false;
-}
-
-bool MsmCameraDevice::controlCommand(uint16_t type, void *ptr, uint16_t ptrlen)
-{
-    LOG_FUNCTION_NAME
-    struct msm_ctrl_cmd ctrlCmd;
-    memset(&ctrlCmd, 0, sizeof(ctrlCmd));
-
-/*
-struct msm_ctrl_cmd {
-	uint16_t type;
-	uint16_t length;
-	void *value;
-	uint16_t status;
-	uint32_t timeout_ms;
-	int resp_fd;  FIXME: to be used by the kernel, pass-through for now
-};
-*/
-    ctrlCmd.type       = type;
-    ctrlCmd.timeout_ms = 5000;
-    ctrlCmd.length     = ptrlen;
-    ctrlCmd.value      = ptr;
-    ctrlCmd.resp_fd    = mControlFd;
-
-    LOGD("controlCommand: ioctl for type %d", type);
-    LOGD("    type:       %d", ctrlCmd.type);
-    LOGD("    timeout_ms: %d", ctrlCmd.timeout_ms);
-    LOGD("    length:     %d", ctrlCmd.length);
-    LOGD("    value:      %p", ctrlCmd.value);
-    LOGD("    resp_fd:    %d", ctrlCmd.resp_fd);
-    
-    int rv = __ioctl(IOCTL_CONTROL, MSM_CAM_IOCTL_CTRL_COMMAND, &ctrlCmd);
-    LOGD("ioctl:: rv = %d", rv);
-    LOGD("    type:       %d", ctrlCmd.type);
-    LOGD("    timeout_ms: %d", ctrlCmd.timeout_ms);
-    LOGD("    length:     %d", ctrlCmd.length);
-    LOGD("    value:      %p", ctrlCmd.value);
-    LOGD("    resp_fd:    %d", ctrlCmd.resp_fd);
-    
-    LOGD("ctrlCmd.value = %d", *(int32_t *)ctrlCmd.value);
-    if (rv == 0)
-        return true;
-    
     LOGE("configCommand failed. Error: %s", strerror(errno));
     return false;
 }
@@ -379,6 +346,7 @@ bool MsmCameraDevice::getSensorInformation()
     struct sensor_cfg_data cfg;
 
     memset(&cfg, 0, sizeof(cfg));
+    cfg.cfg.gfps.prevfps = 1024;
     cfg.cfgtype = CFG_GET_PICT_FPS;
     if (configIoctl(MSM_CAM_IOCTL_SENSOR_IO_CFG, &cfg))
         LOGD("Picture FPS: %d", cfg.cfg.gfps.pictfps);
@@ -393,45 +361,56 @@ bool MsmCameraDevice::getSensorInformation()
     if (configIoctl(MSM_CAM_IOCTL_SENSOR_IO_CFG, &cfg))
         LOGD("Preview PPL: %d", cfg.cfg.prevp_pl);
    
-    LOGE("Failed to get sensor information. Error: %s", strerror(errno));
+//    LOGE("Failed to get sensor information. Error: %s", strerror(errno));
     return true;
 }
 
 bool MsmCameraDevice::setupMemory()
 {
-    /* This is what the existing liboemcamera does, so we replicate.
-     * Essentially provide 3 x 4k buffers to AEC, AWB, AF, IHIST, CS and RS
-     */
-    int types[18] = { MSM_PMEM_AEC, MSM_PMEM_AEC, MSM_PMEM_AEC,
-                      MSM_PMEM_AWB, MSM_PMEM_AWB, MSM_PMEM_AWB,
-                      MSM_PMEM_AF, MSM_PMEM_AF, MSM_PMEM_AF,
-                      MSM_PMEM_IHIST, MSM_PMEM_IHIST, MSM_PMEM_IHIST,
-                      MSM_PMEM_CS, MSM_PMEM_CS, MSM_PMEM_CS,
-                      MSM_PMEM_RS, MSM_PMEM_RS, MSM_PMEM_RS };
+/* From arch/arm/mach-msm/include/mach/camera.h */
+#define NUM_STAT_OUTPUT_BUFFERS            3
+/*
+#define NUM_WB_EXP_NEUTRAL_REGION_LINES    4
+#define NUM_WB_EXP_STAT_OUTPUT_BUFFERS     3
+#define NUM_AUTOFOCUS_MULTI_WINDOW_GRIDS  16
+#define NUM_STAT_OUTPUT_BUFFERS            3
+#define NUM_AF_STAT_OUTPUT_BUFFERS         3
+*/
+    int blockSize = 4096; /* 4k block */
+    int types[] = { MSM_PMEM_AEC, MSM_PMEM_AF, MSM_PMEM_AWB,
+                    MSM_PMEM_IHIST, MSM_PMEM_CS, MSM_PMEM_RS };
+    int nTypes = sizeof(types) / sizeof(int);
+    int nBlocks = nTypes * NUM_STAT_OUTPUT_BUFFERS;
 
+    LOGD("%s: nfunctions = %d, so %d blocks", __FUNCTION__, nTypes, nBlocks);
+                     
     /* We need 18 blocks of 4096 bytes of physical memory. */
-    mSetupMemory = new PhysicalMemoryPool(18, 4096);
+    mSetupMemory = new PhysicalMemoryPool(nBlocks, blockSize);
     if (! mSetupMemory->initialized()) {
         LOGE("%s: failed to get pmem block...", __FUNCTION__);
         return false;
     }
 
     void *base = mSetupMemory->getBaseAddress();
-
     struct msm_pmem_info info;
     memset(&info, 0, sizeof(info));
     info.fd = mSetupMemory->getFd();
     info.vaddr = base;
-    info.len = 4096;
+    info.len = blockSize;
 
     bool ck = true;
-    for (int i = 0; i < 18; i++) {
+    for (int i = 0; i < nTypes; i++) {
         info.type = types[i];
-        info.offset = i * 4096;       
-        ck = configIoctl(MSM_CAM_IOCTL_REGISTER_PMEM, &info);
-        if (ck == false) {
-            LOGE("Unable to set memory for %08x", types[i]);
-            break;
+        for (int j = 0; j < NUM_STAT_OUTPUT_BUFFERS; j++) {
+            int n = i * NUM_STAT_OUTPUT_BUFFERS + j;
+            
+            info.offset = (i * NUM_STAT_OUTPUT_BUFFERS + j) * blockSize;
+            ck = configIoctl(MSM_CAM_IOCTL_REGISTER_PMEM, &info);
+            if (ck == false) {
+                LOGE("Unable to set memory for %08x:%d", types[i], j);
+                break;
+            }
+            LOGD("Set block %08x:%d OK", types[i], j);
         }
     }
     return ck;
@@ -452,9 +431,157 @@ bool MsmCameraDevice::__ioctl(int which, int cmd, void *ptr)
     return false;
 }
 
+bool MsmCameraDevice::controlCommand(uint16_t type, uint16_t length, void *value)
+{
+    struct msm_ctrl_cmd cmd;
+    
+    memset(&cmd, 0, sizeof(cmd));
+    cmd.type = type;
+    cmd.length = length;
+    cmd.value = value;
+    cmd.timeout_ms = 5000;
+    cmd.resp_fd = mControlFd;
+
+    LOGD("issuing control command");
+    bool rv = controlIoctl(MSM_CAM_IOCTL_CTRL_COMMAND, &cmd);
+    if (false == rv || 0== cmd.status) {
+        LOGE("%s(%d) failed.", __FUNCTION__, type);
+        return false;
+    }
+    LOGD("%s(%d) succeeded", __FUNCTION__, type);
+    return true;
+}
+
+bool MsmCameraDevice::inConfigThread()
+{
+    /* Thread that handles control commands. */
+    while (true) {
+        char buffer[200];
+        struct msm_stats_event_ctrl evt;
+    
+        memset(&buffer, 0, 200);
+
+        evt.timeout_ms = -1;
+        evt.ctrl_cmd.value = &buffer;
+        evt.ctrl_cmd.length = 200;
+
+        /* Calls to the configuration ioctl using MSM_CAM_IOCTL_GET_STATS 
+         * will block until there is a response available. If the ioctl 
+         * call fails we assume the underlying socket has been closed
+         * and exit this thread by returning false.
+         */
+        bool rv = configIoctl(MSM_CAM_IOCTL_GET_STATS, &evt);
+        if (false == rv) {
+            LOGE("Error calling ioctl, exiting config thread");
+            return false;
+        }
+        /* the evt structure now contains details of the command that has
+         * been dequeued for processing.
+         */
+        LOGD("Command resptype = %d", evt.resptype);
+
+        switch (evt.resptype) {
+            case MSM_CAM_RESP_CTRL:
+                /* The dequeued command is a control command. */
+                LOGD("ConfigThread: Received an MSM_CAM_RESP_CTRL");
+                /* The struct msm_ctrl_cmd that is returned is then resent
+                 * using the MSM_CAM_IOCTL_CTRL_CMD_DONE. The values within the
+                 * structure here are the ones that will be returned by the
+                 * ioctl.
+                 */
+                LOGD("    ctrl_cmd:");
+                LOGD("        type:      %d", evt.ctrl_cmd.type);
+                LOGD("        length:    %d", evt.ctrl_cmd.length);
+                LOGD("        value:     %p", evt.ctrl_cmd.value);
+                for (int i = 0; i < evt.ctrl_cmd.length; i++)
+                    LOGD("        buffer %d:   %02x", i, buffer[i]);
+                LOGD("        resp_fd:   %d", evt.ctrl_cmd.resp_fd);
+                LOGD("        status:    %d", evt.ctrl_cmd.status);
+
+
+                /* Process the message and store return values in the 
+                 * evt.ctrl_cmd structure. Set the status flag to show
+                 * whether it was OK or not.
+                 */
+                /* ??? - the type values would appear to be values defined
+                 *       as CMD_ constants, but as the libcamera from
+                 *       HTC shows values of 78, 68, 69 & 70 being used
+                 *       this is obviously not the case. Are those values
+                 *       HTC specific and if so any idea what they mean?
+                 */
+                /* todo - implement me!!! */
+
+
+                if (evt.ctrl_cmd.type == 15) {
+                    struct msm_vfe_cfg_cmd vfe = {15, evt.ctrl_cmd.length, evt.ctrl_cmd.value};
+                    bool rc = configIoctl(MSM_CAM_IOCTL_CONFIG_VFE, &vfe);
+                    LOGD("VFE ioctl = %d", rc);
+                }
+
+                evt.ctrl_cmd.status = 1; /* success! */
+
+                rv = controlIoctl(MSM_CAM_IOCTL_CTRL_CMD_DONE, &evt.ctrl_cmd);
+                break;
+            case MSM_CAM_RESP_STAT_EVT_MSG:
+                /* We have recieved a stat event message. */
+                LOGD("ConfigThread: Received an MSM_CAM_RESP_STAT_EVT_MSG");
+                break;
+            case MSM_CAM_RESP_V4L2:
+                /* Video 4 Linux */
+                LOGD("ConfigThread: Received an MSM_CAM_RESP_V4L2");
+                break;
+                
+        }
+        if (false == rv) {
+            LOGE("Error responding to dequeued command, aborting");
+            return false;
+        }
+    }
+    return false;
+}
+
+bool MsmCameraDevice::disableStats()
+{
+    uint32_t val = 0;
+    struct msm_vfe_cfg_cmd vfe = {CMD_STATS_DISABLE, sizeof(val), &val};
+    bool rc = configIoctl(MSM_CAM_IOCTL_CONFIG_VFE, &vfe);
+    LOGE_IF(!rc, "Failed to disable STATS");
+    LOGD_IF(rc, "STATS disabled");
+    return rc;
+}
+
+bool MsmCameraDevice::enableAF()
+{
+    uint32_t val = 0;
+    struct msm_vfe_cfg_cmd vfe = {CMD_STATS_AF_ENABLE, sizeof(val), &val};
+    bool rc = configIoctl(MSM_CAM_IOCTL_CONFIG_VFE, &vfe);
+    LOGE_IF(!rc, "Failed to enable AF STATS");
+    LOGD_IF(rc, "AF STATS enabled");
+    return rc;
+}
+
+bool MsmCameraDevice::enableAWB()
+{
+    uint32_t val = 0;
+    struct msm_vfe_cfg_cmd vfe = {CMD_STATS_AWB_ENABLE, sizeof(val), &val};
+    bool rc = configIoctl(MSM_CAM_IOCTL_CONFIG_VFE, &vfe);
+    LOGE_IF(!rc, "Failed to enable AWB STATS");
+    LOGD_IF(rc, "AWB STATS enabled");
+    return rc;
+}
+
+bool MsmCameraDevice::enableAEC()
+{
+    uint32_t val = 0;
+    struct msm_vfe_cfg_cmd vfe = {CMD_STATS_AEC_ENABLE, sizeof(val), &val};
+    bool rc = configIoctl(MSM_CAM_IOCTL_CONFIG_VFE, &vfe);
+    LOGE_IF(!rc, "Failed to enable AEC STATS");
+    LOGD_IF(rc, "AEC STATS enabled");
+    return rc;
+}
 
 bool MsmCameraDevice::inWorkerThread()
-{
+{   
     /* Wait till FPS timeout expires, or thread exit message is received. */
     WorkerThread::SelectRes res =
         getWorkerThread()->Select(-1, 1000000 / mEmulatedFPS);
@@ -494,6 +621,7 @@ bool MsmCameraDevice::inWorkerThread()
 
     return true;
 }
+
 
 /****************************************************************************
  * Fake camera device private API
@@ -685,91 +813,31 @@ int MsmCameraDevice::rotateFrame()
 
 
 
+/*************************************************************************
+ * Config thread implementation.
+ *************************************************************************/
 
+status_t MsmCameraDevice::ConfigThread::readyToRun()
+{
+    LOG_FUNCTION_NAME
+    /* Confirm the device is ready for the thread starting. */
+    if (NULL == mCameraDevice) {
+        LOGV("Unable to start config thread as no MsmCameraDevice");
+        return BAD_VALUE;
+    }
+    if (-1 == mCameraDevice->mConfigFd || -1 == mCameraDevice->mControlFd) {
+        LOGE("Unable to start config thread as endpoints not open");
+        return BAD_VALUE;
+    }
+    return NO_ERROR;
+}
+
+status_t MsmCameraDevice::ConfigThread::stopThread()
+{
+    LOGV("Stopping  camera device's worker thread...");
+    /* todo - how should we stop the thread? */
+    return NO_ERROR;
+}
 
 } /* ! namespace android */
-
-void *config_thread(void *data) {
-    android::MsmCameraDevice *ca = (android::MsmCameraDevice *)data;
-
-/*
-struct sensor_cfg_data {
-	int cfgtype;
-	int mode;
-	int rs;
-	uint8_t max_steps;
-
-	union {
-		int8_t af_area;
-		int8_t effect;
-		uint8_t lens_shading;
-		uint16_t prevl_pf;
-		uint16_t prevp_pl;
-		uint16_t pictl_pf;
-		uint16_t pictp_pl;
-		uint32_t pict_max_exp_lc;
-		uint16_t p_fps;
-		uint16_t flash_exp_div;
-		struct sensor_pict_fps gfps;
-		struct exp_gain_cfg exp_gain;
-		struct focus_cfg focus;
-		struct fps_cfg fps;
-		struct wb_info_cfg wb_info;
-		struct fuse_id fuse;
-		struct lsc_cfg lsctable;
-		struct otp_cfg sp3d_otp_cfg;
-		struct flash_cfg flash_data;
-//For 2nd CAM
-		enum antibanding_mode antibanding_value;
-		enum brightness_t brightness_value;
-		enum frontcam_t frontcam_value;
-		enum wb_mode wb_value;
-		enum iso_mode iso_value;
-		enum sharpness_mode sharpness_value;
-		enum saturation_mode saturation_value;
-		enum contrast_mode  contrast_value;
-		enum qtr_size_mode qtr_size_mode_value;
-		enum sensor_af_mode af_mode_value;
-	} cfg;
-};
-*/
-
-    for (int j = 0; j < 4; j++) {
-    char buffer[200];
-    struct msm_stats_event_ctrl evt;
-    
-    memset(&buffer, 0, 200);
-
-    evt.timeout_ms = -1;
-    evt.ctrl_cmd.value = &buffer;
-    evt.ctrl_cmd.length = 200;
-   
-    if (ca->configCommand(MSM_CAM_IOCTL_GET_STATS, &evt)) {
-        LOGD("    resptype = %d", evt.resptype);
-        if (evt.resptype == MSM_CAM_RESP_CTRL) {
-            /* The struct msm_ctrl_cmd that is returned is then resent
-             * using the MSM_CAM_IOCTL_CTRL_CMD_DONE. The values within the
-             * structure here are the ones that will be returned by the
-             * ioctl.
-             */
-            LOGD("    ctrl_cmd:");
-            LOGD("        type:      %d", evt.ctrl_cmd.type);
-            LOGD("        length:    %d", evt.ctrl_cmd.length);
-            LOGD("        value:     %p", evt.ctrl_cmd.value);
-            for (int i = 0; i < evt.ctrl_cmd.length; i++)
-                LOGD("        buffer %d:   %02x", i, buffer[i]);
-            LOGD("        resp_fd:   %d", evt.ctrl_cmd.resp_fd);
-            LOGD("        status:    %d", evt.ctrl_cmd.status);
-            buffer[0] = 0x99;
-            if (ca->controlIoctl(MSM_CAM_IOCTL_CTRL_CMD_DONE, &evt.ctrl_cmd)) {
-                LOGD("CMD_DONE sent OK");
-            }
-            
-        }
-
-    }
-    }
-    
-    return NULL;
-}
 

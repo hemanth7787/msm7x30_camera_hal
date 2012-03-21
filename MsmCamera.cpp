@@ -100,7 +100,8 @@ status_t MsmCamera::Initialize()
     mParameters.set(CameraParameters::KEY_SCENE_MODE, 
                     CameraParameters::SCENE_MODE_AUTO);
     mParameters.set(CameraParameters::KEY_ZOOM_SUPPORTED, "true");
-
+    mParameters.set(CameraParameters::KEY_VIDEO_STABILIZATION_SUPPORTED,
+                    "true");
 
     return res;
 }

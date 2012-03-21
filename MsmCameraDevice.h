@@ -55,7 +55,7 @@ class MsmCameraDevice : public CameraDevice
         bool configIoctl(int cmd, void *ptr);
         bool controlIoctl(int cmd, void *ptr);
         bool configCommand(int cmd, void *ptr);
-        bool controlCommand(uint16_t type, void *ptr, uint16_t ptrlen);
+        bool controlCommand(uint16_t type, uint16_t length, void *value);
 
     private:
         int openEndpoint(msm_endpoint_e which);
@@ -70,19 +70,127 @@ class MsmCameraDevice : public CameraDevice
         /* Issue ioctl requests with suitable checks */
         bool __ioctl(int which, int cmd, void *ptr);
 
-bool inWorkerThread();
+        /* Enable AF */
+        bool enableAF();
+        bool enableAWB();
+        bool enableAEC();
+        bool disableStats();
+        
+    protected:
+        bool inConfigThread();
+        bool inWorkerThread();
 
+        /* Class that encapsulates the config thread used by an msm camera
+         * device. */
+    friend class ConfigThread;
+        class ConfigThread : public Thread {
+            /*************************************************************
+             * Public API
+             *************************************************************/
+
+            public:
+                inline explicit ConfigThread(MsmCameraDevice* camera_dev)
+                    : Thread(true),   // Callbacks may involve Java calls.
+                      mCameraDevice(camera_dev),
+                      mThreadControl(-1),
+                      mControlFD(-1)
+                {}
+
+                inline ~ConfigThread() {
+                    LOGW_IF(mThreadControl >= 0 || mControlFD >= 0,
+                            "%s: Control FDs are opened in the destructor",
+                            __FUNCTION__);
+                    if (mThreadControl >= 0) {
+                        close(mThreadControl);
+                    }
+                    if (mControlFD >= 0) {
+                        close(mControlFD);
+                    }
+                }
+
+                /* Starts the thread
+                 * Return:
+                 *  NO_ERROR on success, or an appropriate error status.
+                 */
+                inline status_t startThread()
+                {
+                    return run(NULL, ANDROID_PRIORITY_URGENT_DISPLAY, 0);
+                }
+
+                /* Overriden base class method.
+                 * It is overriden in order to provide one-time 
+                 * initialization just prior to starting the thread routine.
+                 */
+                status_t readyToRun();
+
+                /* Stops the thread. */
+                status_t stopThread();
+
+                /* Values returned from the Select method of this class. */
+                enum SelectRes {
+                /* A timeout has occurred. */
+                TIMEOUT,
+                /* Data are available for read on the provided FD. */
+                READY,
+                /* Thread exit request has been received. */
+                EXIT_THREAD,
+                /* An error has occurred. */
+                ERROR
+            };
+
+            /*************************************************************
+             * Private API
+             *************************************************************/
+
+            private:
+                /* Implements abstract method of the base Thread class. */
+                bool threadLoop()
+                {
+                    return mCameraDevice->inConfigThread();
+                }
+
+                /* Containing camera device object. */
+                MsmCameraDevice*   mCameraDevice;
+
+            /* FD that is used to send control messages into the thread. */
+            int                     mThreadControl;
+
+            /* FD that thread uses to receive control messages. */
+            int                     mControlFD;
+
+            /* Enumerates control messages that can be sent into the thread. */
+            enum ControlMessage {
+                /* Stop the thread. */
+                THREAD_STOP
+            };
+    };
+
+    /* Config thread accessor. */
+    inline ConfigThread *getConfigThread() const
+    {
+        return mConfigThread.get();
+    }
+
+    /*********************************************************************
+     * Data memebers.
+     *********************************************************************/
+
+    protected:
+        /* Our parent MsmCamera object. */
+        MsmCamera *mCamera;
+        /* Config thread that is used for device configuration. */
+        sp<ConfigThread>            mConfigThread;
+
+        /* Kernel access points */
+        int mControlFd;
+        int mConfigFd;
 
     /*********************************************************************
      * Data memebers.
      *********************************************************************/
 
     private:
-        MsmCamera *mCamera;
-               
-        /* Kernel access points */
-        int mControlFd;
-        int mConfigFd;
+              
         /* Sensor information */
         struct msm_camsensor_info mSensorInfo;
         int mVendorId;

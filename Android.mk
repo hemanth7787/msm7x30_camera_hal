@@ -20,7 +20,7 @@ include $(CLEAR_VARS)
 	
 LOCAL_MODULE_PATH := $(TARGET_OUT_SHARED_LIBRARIES)/hw
 LOCAL_MODULE := camera.$(TARGET_BOARD_PLATFORM)
-
+LOCAL_CFLAGS := -DCONFIG_720P_CAMERA
 LOCAL_C_INCLUDES += external/jpeg \
                     external/skia/include/core/ \
                     frameworks/base/core/jni/android/graphics
